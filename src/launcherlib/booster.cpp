@@ -268,6 +268,10 @@ int Booster::run(SocketManager * socketManager)
         // Execute the binary
         Logger::logDebug("Booster: invoking '%s' ", m_appData->fileName().c_str());
         try {
+            if (access(m_appData->fileName().c_str(), X_OK) != 0) {
+                throw std::runtime_error("Booster: Binary doesn't have execute permissions\n");
+            }
+
             return launchProcess();
         } catch (const std::runtime_error &e) {
             Logger::logError("Booster: Failed to invoke: %s\n", e.what());
