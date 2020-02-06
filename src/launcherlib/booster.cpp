@@ -521,7 +521,8 @@ void Booster::setEnvironmentBeforeLaunch()
         }
 
         if (getegid() != m_appData->groupId()) {
-            setgid(m_appData->groupId());
+            setresgid(m_appData->groupId(), m_appData->groupId(),
+                      m_appData->groupId());
         }
     }
 
