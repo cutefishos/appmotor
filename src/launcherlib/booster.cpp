@@ -512,18 +512,11 @@ void Booster::setEnvironmentBeforeLaunch()
     // Going forward, this could be improved to support
     // a larger range of privileges via ACLs.
     if (!isPrivileged(m_appData)) {
-        // The application is not privileged.  Drop any user or
-        // group ID inherited from the booster, and instead set
-        // the user ID and group ID of the calling process.
-
-        if (geteuid() != m_appData->userId()) {
-            setuid(m_appData->userId());
-        }
-
-        if (getegid() != m_appData->groupId()) {
-            setresgid(m_appData->groupId(), m_appData->groupId(),
-                      m_appData->groupId());
-        }
+        // The application is not privileged. Drop group ID
+        // inherited from the booster executable.
+        gid_t gid = getgid();
+        if (setresgid(gid, gid, gid))
+            Logger::logError("Booster: can't change the process GID: %m");
     }
 
     // Make sure that boosted application can dump core. This must be
