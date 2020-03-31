@@ -19,6 +19,6 @@ add_executable(invoker ${SRC})
 target_link_libraries(invoker ${DBUS_LDFLAGS})
 
 # Add install rule
-install(PROGRAMS invoker DESTINATION /usr/bin/)
+install(TARGETS invoker DESTINATION /usr/bin/)
 
 
