@@ -47,7 +47,10 @@ add_subdirectory(src)
 # Target for documentation (make doc)
 find_program(Doxygen NAMES doxygen)
 if (EXISTS ${Doxygen})
-    add_custom_target(doc COMMAND cd doc && ${Doxygen} doxygen-impldoc.conf COMMAND cd doc && ${Doxygen} doxygen-userdoc.conf COMMAND cd doc && ${Doxygen} doxygen-mdeclarativecache.conf)
+    add_custom_target(doc
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/doc && ${Doxygen} doxygen-impldoc.conf
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/doc && ${Doxygen} doxygen-userdoc.conf
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/doc && ${Doxygen} doxygen-mdeclarativecache.conf)
 else (EXISTS ${Doxygen})
     message(STATUS "Doxygen not found: you're not able to build documentation.")
 endif (EXISTS ${Doxygen})
