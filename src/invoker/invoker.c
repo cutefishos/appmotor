@@ -26,7 +26,6 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/socket.h>
-#include <bits/socket.h>
 #include <sys/un.h>
 #include <sys/uio.h>
 #include <sys/time.h>
