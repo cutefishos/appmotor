@@ -20,7 +20,10 @@
 #include "appdata.h"
 #include "protocol.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/types.h>
+#include <fstream>
+#include <dirent.h>
 
 AppData::AppData() :
     m_options(0),
@@ -99,6 +102,7 @@ const string & AppData::appName() const
 void AppData::setFileName(const string & newFileName)
 {
     m_fileName = newFileName;
+    checkPrivileges();
 }
 
 const string & AppData::fileName() const
@@ -161,6 +165,83 @@ gid_t AppData::groupId() const
 {
     return m_gid;
 }
+
+string AppData::getPrivileges(const char *path)
+{
+    /*
+       Returns string of the declared privileges for this app.
+       The privileges file has the following format:
+           /full/path/to/app,<permissions_list>
+       where the permissions_list is a string of characters
+       defining different categories of permissions
+           eg: p = people/contacts data
+       example:
+           /usr/bin/vcardconverter,p
+       Currently, permission means both read+write permission.
+       Comment lines start with # and are ignored.
+    */
+
+    std::ifstream infile(path);
+    if (infile) {
+        std::string line;
+        while (std::getline(infile, line)) {
+            if (line.find('#') == 0) {
+                // Comment line
+                continue;
+            }
+
+            size_t pos = line.find(',');
+            if (pos != std::string::npos) {
+                std::string filename = line.substr(0, pos);
+                std::string permissions = line.substr(pos+1);
+
+                if (filename == m_fileName) {
+                    return permissions;
+                }
+            }
+        }
+    }
+
+    return "";
+}
+
+void AppData::checkPrivileges()
+{
+    /*
+        This function checks the standard paths to find privileges definition file
+        and sets the m_privileges string.
+        First it will check
+            /usr/share/mapplauncherd/privileges
+        And then, any file in
+            /usr/share/mapplauncherd/privileges.d/
+     */
+    static const char *BOOSTER_APP_PRIVILEGES_LIST = "/usr/share/mapplauncherd/privileges";
+    static const char *BOOSTER_APP_PRIVILEGES_DIR = "/usr/share/mapplauncherd/privileges.d";
+    m_privileges = getPrivileges(BOOSTER_APP_PRIVILEGES_LIST);
+
+    DIR *privilegesDir = opendir(BOOSTER_APP_PRIVILEGES_DIR);
+    if (privilegesDir) {
+        dirent *dir = NULL;
+        while ((dir = readdir(privilegesDir))) {
+            std::string privilegesFile (BOOSTER_APP_PRIVILEGES_DIR);
+            privilegesFile += "/";
+            privilegesFile += dir->d_name;
+            m_privileges += getPrivileges(privilegesFile.c_str());
+        }
+        closedir(privilegesDir);
+    }
+}
+
+bool AppData::isPrivileged() const
+{
+    return m_privileges.length() > 0;
+}
+
+string AppData::privileges() const
+{
+    return m_privileges;
+}
+
 
 AppData::~AppData()
 {

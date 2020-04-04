@@ -120,10 +120,18 @@ public:
     //! Get group ID of calling process
     gid_t groupId() const;
 
+    //! Returns true if the child process should be privileged
+    bool isPrivileged() const;
+
+    //! Get privilege string for this app
+    string privileges() const;
+
 private:
 
     AppData(const AppData & r);
     AppData & operator= (const AppData & r);
+    string getPrivileges(const char *path);
+    void checkPrivileges();
 
     uint32_t    m_options;
     int         m_argc;
@@ -136,6 +144,7 @@ private:
     vector<int> m_ioDescriptors;
     gid_t       m_gid;
     uid_t       m_uid;
+    string      m_privileges;
 };
 
 #endif // APPDATA_H

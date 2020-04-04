@@ -334,79 +334,6 @@ void Booster::renameProcess(int parentArgc, char** parentArgv,
     }
 }
 
-static bool isPrivileged(AppData *appData, const char *path)
-{
-    /*
-       Returns true if privileged, false if not privileged.
-       The privileges file has the following format:
-           /full/path/to/app,<permissions_list>
-       where the permissions_list is a string of characters
-       defining different categories of permissions
-           eg: p = people/contacts data
-       example:
-           /usr/bin/vcardconverter,p
-       Currently, permission means both read+write permission.
-       Comment lines start with # and are ignored.
-    */
-
-    std::ifstream infile(path);
-    if (infile) {
-        std::string line;
-        while (std::getline(infile, line)) {
-            if (line.find('#') == 0) {
-                // Comment line
-                continue;
-            }
-
-            size_t pos = line.find(',');
-            if (pos != std::string::npos) {
-                std::string filename = line.substr(0, pos);
-                std::string permissions = line.substr(pos+1);
-
-                // TODO: Actually do something with "permissions"
-
-                if (filename == appData->fileName()) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
-static bool isPrivileged(AppData *appData)
-{
-    /*
-        Return true if privileged, false if not privileged.
-
-        This function checks the standard paths to find privileges definition file.
-        First it will check
-            /usr/share/mapplauncherd/privileges
-        And then, any file in
-            /usr/share/mapplauncherd/privileges.d/
-     */
-    static const char *BOOSTER_APP_PRIVILEGES_LIST = "/usr/share/mapplauncherd/privileges";
-    static const char *BOOSTER_APP_PRIVILEGES_DIR = "/usr/share/mapplauncherd/privileges.d";
-    if (isPrivileged(appData, BOOSTER_APP_PRIVILEGES_LIST))
-        return true;
-
-    DIR *privilegesDir = opendir(BOOSTER_APP_PRIVILEGES_DIR);
-    if (!privilegesDir)
-        return false;
-
-    bool privileged = false;
-    dirent *dir = NULL;
-    while ((dir = readdir(privilegesDir)) && !privileged) {
-        std::string privilegesFile (BOOSTER_APP_PRIVILEGES_DIR);
-        privilegesFile += "/";
-        privilegesFile += dir->d_name;
-        privileged = isPrivileged(appData, privilegesFile.c_str());
-    }
-    closedir(privilegesDir);
-    return privileged;
-}
-
 struct NotCharacter {
     char c;
 
@@ -507,11 +434,7 @@ void Booster::setEnvironmentBeforeLaunch()
 
     setCgroup(m_appData->fileName());
 
-    // Currently, we only have two levels of privileges:
-    // privileged and non-privileged.
-    // Going forward, this could be improved to support
-    // a larger range of privileges via ACLs.
-    if (!isPrivileged(m_appData)) {
+    if (!m_appData->isPrivileged()) {
         // The application is not privileged. Drop group ID
         // inherited from the booster executable.
         gid_t gid = getgid();

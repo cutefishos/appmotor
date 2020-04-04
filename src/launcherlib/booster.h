@@ -213,6 +213,8 @@ private:
     //! True, if being run in boot mode.
     bool m_bootMode;
 
+    std::string m_privileges;
+
 #ifdef UNIT_TEST
     friend class Ut_Booster;
 #endif
