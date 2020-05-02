@@ -182,6 +182,7 @@ string AppData::getPrivileges(const char *path)
     */
 
     std::ifstream infile(path);
+    std::string permissions;
     if (infile) {
         std::string line;
         while (std::getline(infile, line)) {
@@ -193,16 +194,21 @@ string AppData::getPrivileges(const char *path)
             size_t pos = line.find(',');
             if (pos != std::string::npos) {
                 std::string filename = line.substr(0, pos);
-                std::string permissions = line.substr(pos+1);
-
                 if (filename == m_fileName) {
-                    return permissions;
+                    if (pos == line.length()-1) {
+                        // some privilege files don't include any privilege flag
+                        // but still need to make the process privileged
+                        permissions += " ";
+                    }
+                    else {
+                        permissions += line.substr(pos+1);
+                    }
                 }
             }
         }
     }
 
-    return "";
+    return permissions;
 }
 
 void AppData::checkPrivileges()
