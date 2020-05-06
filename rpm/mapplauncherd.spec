@@ -15,7 +15,6 @@ BuildRequires:  pkgconfig(libshadowutils)
 BuildRequires:  pkgconfig(systemd)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  cmake
-BuildRequires:  python
 Provides:   meegotouch-applauncherd > 3.0.3
 Obsoletes:   meegotouch-applauncherd <= 3.0.3
 
