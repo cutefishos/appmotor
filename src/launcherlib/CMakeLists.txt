@@ -1,3 +1,5 @@
+include(GNUInstallDirs)
+
 set(COMMON ${CMAKE_HOME_DIRECTORY}/src/common)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${COMMON})
@@ -21,6 +23,6 @@ add_library(applauncherd MODULE ${SRC} ${MOC_SRC})
 set_target_properties(applauncherd PROPERTIES VERSION 0.1 SOVERSION 0)
 
 # Add install rule
-install(TARGETS applauncherd DESTINATION /usr/lib)
+install(TARGETS applauncherd DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR})
 install(FILES ${HEADERS} DESTINATION /usr/include/applauncherd
   PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
