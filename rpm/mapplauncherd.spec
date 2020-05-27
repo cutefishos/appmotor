@@ -2,7 +2,6 @@ Name:       mapplauncherd
 Summary:    Application launcher for fast startup
 Version:    4.1.31
 Release:    1
-Group:      System/Daemons
 License:    LGPLv2+
 URL:        https://git.merproject.org/mer-core/mapplauncherd
 Source0:    %{name}-%{version}.tar.bz2
@@ -52,8 +51,9 @@ export BUILD_TESTS=1
 export MEEGO=1
 unset LD_AS_NEEDED
 
-%configure --disable-static
-make %{?jobs:-j%jobs}
+rm -f CMakeCache.txt
+%cmake
+make %{?_smp_mflags}
 
 %install
 rm -rf %{buildroot}
@@ -62,14 +62,14 @@ rm -rf %{buildroot}
 # Don't use %exclude, remove at install phase
 rm -f %{buildroot}/usr/share/fala_images/fala_qml_helloworld
 
-mkdir -p %{buildroot}/usr/lib/systemd/user/user-session.target.wants
-ln -s ../booster-generic.service %{buildroot}/usr/lib/systemd/user/user-session.target.wants/
+mkdir -p %{buildroot}%{_userunitdir}/user-session.target.wants
+ln -s ../booster-generic.service %{buildroot}%{_userunitdir}/user-session.target.wants/
 
 mkdir -p %{buildroot}%{_datadir}/mapplauncherd/privileges.d
 
-install -D -m 0755 %{SOURCE1} %{buildroot}/lib/systemd/system/booster-cgroup-mount.service
-mkdir -p %{buildroot}/lib/systemd/system/multi-user.target.wants
-ln -s ../booster-cgroup-mount.service %{buildroot}/lib/systemd/system/multi-user.target.wants/
+install -D -m 0755 %{SOURCE1} %{buildroot}%{_unitdir}/booster-cgroup-mount.service
+mkdir -p %{buildroot}%{_unitdir}/multi-user.target.wants
+ln -s ../booster-cgroup-mount.service %{buildroot}%{_unitdir}/multi-user.target.wants/
 
 install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/booster-cgroup-mount
 
@@ -88,15 +88,16 @@ groupadd -rf privileged
 %{_bindir}/single-instance
 %{_libdir}/libapplauncherd.so*
 %attr(2755, root, privileged) %{_libexecdir}/mapplauncherd/booster-generic
-%{_libdir}/systemd/user/booster-generic.service
-%{_libdir}/systemd/user/user-session.target.wants/booster-generic.service
+%{_userunitdir}//booster-generic.service
+%{_userunitdir}/user-session.target.wants/booster-generic.service
 
 %files devel
 %defattr(-,root,root,-)
 %{_includedir}/applauncherd/*
 
 %files cgroup
-/lib/systemd/system/booster-cgroup-mount.service
-/lib/systemd/system/multi-user.target.wants/booster-cgroup-mount.service
-%dir %{_libdir}/startup
-%{_libdir}/startup/booster-cgroup-mount
+%{_unitdir}/booster-cgroup-mount.service
+%{_unitdir}/multi-user.target.wants/booster-cgroup-mount.service
+# Intentionally hardcoded so that this always lives in the same place
+%dir /usr/lib/startup
+/usr/lib/startup/booster-cgroup-mount
