@@ -19,6 +19,4 @@ add_executable(invoker ${SRC})
 target_link_libraries(invoker ${DBUS_LDFLAGS})
 
 # Add install rule
-install(TARGETS invoker DESTINATION /usr/bin/)
-
-
+install(TARGETS invoker DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})

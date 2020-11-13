@@ -3,6 +3,11 @@ project(Applauncherd)
 cmake_minimum_required(VERSION 2.6)
 cmake_policy(VERSION 2.6)
 
+include(FeatureSummary)
+include(GNUInstallDirs)
+
+option(INSTALL_SYSTEMD_UNITS "Install systemd unit files" ON)
+
 #
 # NOTE: For verbose build use VERBOSE=1
 #
@@ -56,6 +61,6 @@ else (EXISTS ${Doxygen})
 endif (EXISTS ${Doxygen})
 
 # Install html documentation
-install(DIRECTORY doc/implementation-documentation DESTINATION /usr/share/doc/applauncherd OPTIONAL)
-install(DIRECTORY doc/user-documentation DESTINATION /usr/share/doc/applauncherd OPTIONAL)
-install(DIRECTORY doc/mdeclarativecache-documentation DESTINATION /usr/share/doc/applauncherd OPTIONAL)
+install(DIRECTORY doc/implementation-documentation DESTINATION ${CMAKE_INSTALL_FULL_DOCDIR} OPTIONAL)
+install(DIRECTORY doc/user-documentation DESTINATION ${CMAKE_INSTALL_FULL_DOCDIR} OPTIONAL)
+install(DIRECTORY doc/mdeclarativecache-documentation DESTINATION ${CMAKE_INSTALL_FULL_DOCDIR} OPTIONAL)

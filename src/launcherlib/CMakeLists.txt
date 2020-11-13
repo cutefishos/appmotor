@@ -32,5 +32,5 @@ target_link_libraries(applauncherd ${SYSTEMD_LIBRARIES})
 
 # Add install rule
 install(TARGETS applauncherd DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR})
-install(FILES ${HEADERS} DESTINATION /usr/include/applauncherd
+install(FILES ${HEADERS} DESTINATION ${CMAKE_INSTALL_FULL_INCLUDEDIR}/applauncherd
   PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
