@@ -1,10 +1,16 @@
-project(Applauncherd)
+cmake_minimum_required(VERSION 3.0)
+cmake_policy(VERSION 3.0)
 
-cmake_minimum_required(VERSION 2.6)
-cmake_policy(VERSION 2.6)
+project(Applauncherd
+	VERSION 4.1.43
+	DESCRIPTION "A daemon that helps to launch applications faster")
+
+find_package(ECM REQUIRED NO_MODULE)
+set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 
 include(FeatureSummary)
 include(GNUInstallDirs)
+include(ECMGeneratePkgConfigFile)
 
 option(INSTALL_SYSTEMD_UNITS "Install systemd unit files" ON)
 
