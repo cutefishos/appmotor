@@ -107,10 +107,11 @@ void Booster::initialize(int initialArgc, char ** initialArgv, int newBoosterLau
             SingleInstancePluginEntry * pluginEntry = singleInstance->pluginEntry();
             if (pluginEntry)
             {
-                if (!pluginEntry->lockFunc(m_appData->appName().c_str()))
+                std::string lockedAppName = getLockedAppName();
+                if (!pluginEntry->lockFunc(lockedAppName.c_str()))
                 {
                     // Try to activate the window of the existing instance
-                    if (!pluginEntry->activateExistingInstanceFunc(m_appData->appName().c_str()))
+                    if (!pluginEntry->activateExistingInstanceFunc(lockedAppName.c_str()))
                     {
                         Logger::logWarning("Booster: Can't activate existing instance of the application!");
                         m_connection->sendExitValue(EXIT_FAILURE);
@@ -612,4 +613,38 @@ void Booster::resetOomAdj()
     } else {
         Logger::logError("Couldn't open '%s' for writing", PROC_OOM_ADJ_FILE);
     }
+}
+
+std::string Booster::getLockedAppName()
+{
+    std::string name = m_appData->appName();
+    if (name == "/usr/bin/sailjail") {
+        // This doesn't implement sailjail's parsing logic but instead
+        // has some assumptions about the arguments:
+        // - If there is --, then the application is
+        //   the next argument after that.
+        // - If there is an argument that begins with /usr/bin/,
+        //   then the application is that argument.
+        // The one that is found first is used as the application name.
+        // Otherwise it can not be deduced and the original value is used.
+        //
+        // If you want to give a value to sailjail that begins with /usr/bin/,
+        // use the long format with '=' character between the argument and the
+        // value.
+        // If the application is specified without /usr/bin,
+        // then adding -- before the application name allows this to work.
+        const char **ptr = m_appData->argv()+1;
+        for (int i = 1; i < m_appData->argc(); i++, ptr++) {
+            if (strcmp(*ptr, "--") == 0) {
+                if (i+1 < m_appData->argc()) {
+                    name = *(++ptr);
+                    break;
+                }
+            } else if (strncmp(*ptr, "/usr/bin/", 9) == 0) {
+                name = *ptr;
+                break;
+            }
+        }
+    }
+    return name;
 }
