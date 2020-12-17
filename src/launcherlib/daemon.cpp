@@ -169,8 +169,6 @@ void Daemon::run(Booster *booster)
     Logger::logDebug("Daemon: forking booster: %s", booster->boosterType().c_str());
     forkBooster();
 
-
-
     // Notify systemd that init is done
     if (m_notifySystemd) {
         Logger::logDebug("Daemon: initialization done. Notify systemd\n");
