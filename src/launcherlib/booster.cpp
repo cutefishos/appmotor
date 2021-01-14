@@ -107,7 +107,7 @@ void Booster::initialize(int initialArgc, char ** initialArgv, int newBoosterLau
             SingleInstancePluginEntry * pluginEntry = singleInstance->pluginEntry();
             if (pluginEntry)
             {
-                std::string lockedAppName = getLockedAppName();
+                std::string lockedAppName = getFinalFileName();
                 if (!pluginEntry->lockFunc(lockedAppName.c_str()))
                 {
                     // Try to activate the window of the existing instance
@@ -433,7 +433,8 @@ void Booster::setEnvironmentBeforeLaunch()
     if (!errno && cur_prio < m_appData->priority())
         setpriority(PRIO_PROCESS, 0, m_appData->priority());
 
-    setCgroup(m_appData->fileName());
+    std::string fileName = getFinalFileName();
+    setCgroup(fileName);
 
     if (!m_appData->isPrivileged()) {
         // The application is not privileged. Drop group ID
@@ -615,9 +616,9 @@ void Booster::resetOomAdj()
     }
 }
 
-std::string Booster::getLockedAppName()
+std::string Booster::getFinalFileName()
 {
-    std::string name = m_appData->appName();
+    std::string name = m_appData->fileName();
     if (name == "/usr/bin/sailjail") {
         // This doesn't implement sailjail's parsing logic but instead
         // has some assumptions about the arguments:

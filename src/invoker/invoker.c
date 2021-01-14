@@ -416,7 +416,7 @@ static void usage(int status)
            "  -o, --keep-oom-score   Notify invoker that the launched process should inherit oom_score_adj\n"
            "                         from the booster. The score is reset to 0 normally.\n"
            "  -T, --test-mode        Invoker test mode. Also control file in root home should be in place.\n"
-           "  -F, --desktop-file     Desktop file of the application.\n"
+           "  -F, --desktop-file     Desktop file of the application to notify lipstick of launching app.\n"
            "  -h, --help             Print this help.\n\n"
            "Example: %s --type=qt5 /usr/bin/helloworld\n\n",
            PROG_NAME_INVOKER, EXIT_DELAY, RESPAWN_DELAY, MAX_RESPAWN_DELAY, PROG_NAME_INVOKER);
@@ -468,7 +468,7 @@ static void notify_app_lauch(const char *desktop_file)
     } else {
         info("Failed to connect to the DBus session bus: %s", error.message);
         dbus_error_free(&error);
-        return 1;
+        return;
     }
 }
 
