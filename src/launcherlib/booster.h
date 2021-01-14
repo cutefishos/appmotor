@@ -194,8 +194,8 @@ private:
     //! Helper method: load the library and find out address for "main".
     void* loadMain();
 
-    //! Helper method: returns application name for to use for locking
-    std::string getLockedAppName();
+    //! Helper method: returns application name for to use for locking etc.
+    std::string getFinalFileName();
 
     //! Socket connection to invoker
     Connection* m_connection;
