@@ -46,6 +46,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <grp.h>
+#include <libgen.h>
 
 #include "coverage.h"
 
@@ -328,8 +329,11 @@ void Booster::renameProcess(int parentArgc, char** parentArgv,
         }
 
         // Set the process name using prctl, 'killall' and 'top' use it
-        if ( prctl(PR_SET_NAME, basename(sourceArgv[0])) == -1 )
+	char* processName = strdup(sourceArgv[0]);
+        if ( prctl(PR_SET_NAME, basename(processName)) == -1 )
             Logger::logError("Booster: on set new process name: %s ", strerror(errno));
+
+	std::free(processName);
 
         setenv("_", sourceArgv[0], true);
     }
@@ -508,7 +512,7 @@ void* Booster::loadMain()
     else
         dlopenFlags |= RTLD_LOCAL;
 
-#if (PLATFORM_ID == Linux)
+#if (PLATFORM_ID == Linux) && defined(__GLIBC__)
     if (m_appData->dlopenDeep())
         dlopenFlags |= RTLD_DEEPBIND;
 #endif
