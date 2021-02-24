@@ -1,6 +1,8 @@
 /***************************************************************************
 **
 ** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (C) 2013 - 2021 Jolla Ltd.
+** Copyright (C) 2018 - 2020 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -58,6 +60,7 @@ Booster::Booster() :
     m_spaceAvailable(0),
     m_bootMode(false)
 {
+    Connection::setMountNamespace(Connection::getMountNamespace(getpid()));
 }
 
 Booster::~Booster()
@@ -236,8 +239,15 @@ bool Booster::receiveDataFromInvoker(int socketFd)
     // Accept a new invocation.
     if (m_connection->accept(m_appData))
     {
+        // Check that the caller is allowed to invoke apps
+        if (!m_connection->isPermitted())
+        {
+            m_connection->close();
+            return false;
+        }
+
         // Receive application data from the invoker
-        if(!m_connection->receiveApplicationData(m_appData))
+        if (!m_connection->receiveApplicationData(m_appData))
         {
             m_connection->close();
             return false;
