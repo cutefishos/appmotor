@@ -14,6 +14,7 @@ Requires(pre):  sailfish-setup
 BuildRequires:  pkgconfig(libshadowutils)
 BuildRequires:  pkgconfig(systemd)
 BuildRequires:  pkgconfig(dbus-1)
+BuildRequires:  pkgconfig(libcap)
 BuildRequires:  cmake
 Provides:   meegotouch-applauncherd > 3.0.3
 Obsoletes:   meegotouch-applauncherd <= 3.0.3

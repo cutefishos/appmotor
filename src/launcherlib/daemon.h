@@ -1,6 +1,7 @@
 /***************************************************************************
 **
 ** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (C) 2013 - 2021 Jolla Ltd.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -204,6 +205,9 @@ private:
 
     //! True if systemd needs to be notified
     bool m_notifySystemd;
+
+    //! Drop capabilities needed for initialization
+    static void dropCapabilities();
 
     //! Booster instance
     Booster * m_booster;
