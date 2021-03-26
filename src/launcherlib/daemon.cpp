@@ -1,6 +1,8 @@
 /***************************************************************************
 **
 ** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (C) 2013 - 2021 Jolla Ltd.
+** Copyright (C) 2020 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -26,6 +28,7 @@
 
 #include <cstdlib>
 #include <cerrno>
+#include <sys/capability.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -346,6 +349,19 @@ void Daemon::loadSingleInstancePlugin()
     }
 }
 
+void Daemon::dropCapabilities()
+{
+    cap_t caps = cap_init();
+
+    if (!caps || cap_set_proc(caps) == -1) {
+        Logger::logError("Daemon: Failed to drop capabilities");
+    }
+
+    if (caps) {
+        cap_free(caps);
+    }
+}
+
 void Daemon::forkBooster(int sleepTime)
 {
     if (!m_booster) {
@@ -412,6 +428,9 @@ void Daemon::forkBooster(int sleepTime)
         }
 
         m_instance = NULL;
+
+        // No need for capabilities anymore
+        dropCapabilities();
 
         // Run the current Booster
         int retval = m_booster->run(m_socketManager);

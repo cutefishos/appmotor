@@ -1,6 +1,7 @@
 /***************************************************************************
 **
 ** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (C) 2012 - 2021 Jolla Ltd.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -83,6 +84,15 @@ public:
     //! \brief Send application exit value 
     bool sendExitValue(int value);
 
+    //! \brief Check if caller is permitted to invoke apps
+    bool isPermitted();
+
+    //! \brief Get device id and inode number pair of a mount namespace
+    static std::pair<dev_t, ino_t> getMountNamespace(pid_t pid);
+
+    //! \brief Set required mount namespace for invoker processes
+    static void setMountNamespace(std::pair<dev_t, ino_t> mntNS);
+
 private:
 
     /*! \brief Receive actions.
@@ -132,6 +142,9 @@ private:
     //! Send process pid
     bool sendPid(pid_t pid);
 
+    //! Helper method: Get executable path for pid
+    static std::string getExecutablePath(pid_t pid);
+
     //! Send message to a socket. This is a virtual to help unit testing.
     virtual bool sendMsg(uint32_t msg);
 
@@ -160,6 +173,7 @@ private:
     gid_t    m_gid;
     uid_t    m_uid;
 
+    static std::pair<dev_t, ino_t> s_mntNS;
 
 #ifdef UNIT_TEST
     friend class Ut_Connection;

@@ -8,11 +8,13 @@ Source0:    %{name}-%{version}.tar.bz2
 Source1:    booster-cgroup-mount.service
 Requires:   systemd-user-session-targets
 Requires(post): /sbin/ldconfig
+Requires(post): /usr/sbin/setcap
 Requires(postun): /sbin/ldconfig
-Requires(pre):  shadow-utils
+Requires(pre):  sailfish-setup
 BuildRequires:  pkgconfig(libshadowutils)
 BuildRequires:  pkgconfig(systemd)
 BuildRequires:  pkgconfig(dbus-1)
+BuildRequires:  pkgconfig(libcap)
 BuildRequires:  cmake
 Provides:   meegotouch-applauncherd > 3.0.3
 Obsoletes:   meegotouch-applauncherd <= 3.0.3
@@ -25,7 +27,6 @@ functionality to launch applications as single instances.
 
 %package devel
 Summary:    Development files for launchable applications
-Group:      Development/Tools
 Requires:   %{name} = %{version}-%{release}
 Provides:   meegotouch-applauncherd-devel > 3.0.3
 Obsoletes:  meegotouch-applauncherd-devel <= 3.0.3
@@ -36,7 +37,6 @@ using mapplauncherd.
 
 %package cgroup
 Summary:    Service files for booster cgroup mount
-Group:      System/Daemons
 Requires:   %{name} = %{version}-%{release}
 
 %description cgroup
@@ -73,10 +73,9 @@ ln -s ../booster-cgroup-mount.service %{buildroot}%{_unitdir}/multi-user.target.
 
 install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/booster-cgroup-mount
 
-%pre
-groupadd -rf privileged
-
-%post -p /sbin/ldconfig
+%post
+/sbin/ldconfig
+/usr/sbin/setcap cap_sys_ptrace+pe %{_libexecdir}/mapplauncherd/booster-generic || :
 
 %postun -p /sbin/ldconfig
 

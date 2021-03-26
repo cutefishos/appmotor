@@ -59,6 +59,10 @@ name of the application. Then the booster process waits for a connection
 from the invoker with the information about which application should be
 launched. 
 
+Before launching application boosters check that the calling process is allowed
+to invoke applications. This requires CAP_SYS_PTRACE. All boosters must have
+that set to function.
+
 Contributors
 ==============================
 
