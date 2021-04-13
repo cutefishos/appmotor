@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2013 - 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -35,7 +37,7 @@ SocketManager::SocketManager()
 {
     const char *runtimeDir = getenv("XDG_RUNTIME_DIR");
     if (!runtimeDir || !*runtimeDir)
-        runtimeDir = "/tmp/";
+        runtimeDir = "/tmp";
 
     m_socketRootPath = runtimeDir;
     m_socketRootPath += "/mapplauncherd";
@@ -46,66 +48,123 @@ SocketManager::SocketManager()
                              m_socketRootPath.c_str(), strerror(errno));
         }
     }
+}
 
-    m_socketRootPath += '/';
+static string extractTail(string &work)
+{
+    string tok;
+    string::size_type n;
+    if ((n = work.rfind('/')) == string::npos) {
+        tok = work;
+        work.clear();
+    } else {
+        tok = work.substr(n + 1);
+        work.erase(n);
+    }
+    return tok;
+}
+
+string SocketManager::prepareSocket(const string &socketId) const
+{
+    string socketPath;
+
+    /* Extract APP/TYPE/SOCKET */
+    string work(socketId);
+    string socketFile(extractTail(work));
+    string typeId(extractTail(work));
+    string appId(extractTail(work));
+
+    if (!work.empty() || socketFile.empty()) {
+        Logger::logError("Daemon: Invalid socketId: %s\n", socketId.c_str());
+        return socketPath;
+    }
+
+    /* Construct socket path and subdirectories */
+    work = m_socketRootPath;
+
+    if (!appId.empty()) {
+        work += '/';
+        work += appId;
+        if (mkdir(work.c_str(), 0750) == -1 && errno != EEXIST) {
+            Logger::logError("Daemon: Cannot create socket app directory %s: %s\n",
+                             work.c_str(), strerror(errno));
+            return socketPath;
+        }
+    }
+
+    if (!typeId.empty()) {
+        work += '/';
+        work += typeId;
+        if (mkdir(work.c_str(), 0750) == -1 && errno != EEXIST) {
+            Logger::logError("Daemon: Cannot create socket type directory %s: %s\n",
+                             work.c_str(), strerror(errno));
+            return socketPath;
+        }
+    }
+
+    work += '/';
+    work += socketFile;
+    if (unlink(work.c_str()) == -1 && errno != ENOENT) {
+        Logger::logError("Daemon: Cannot remove stale socket %s: %s\n",
+                         work.c_str(), strerror(errno));
+        return socketPath;
+    }
+
+    /* Success */
+    socketPath = work;
+    return socketPath;
 }
 
 void SocketManager::initSocket(const string & socketId)
 {
-    string socketPath = m_socketRootPath + socketId;
-
     // Initialize a socket at socketId if one already doesn't
     // exist for that id / path.
     if (m_socketHash.find(socketId) == m_socketHash.end())
     {
+        string socketPath = prepareSocket(socketId);
+        if (socketPath.empty()) {
+            string msg;
+            msg += "SocketManager: Failed to prepare socketId ";
+            msg += socketId;
+            throw std::runtime_error(msg);
+        }
+
         Logger::logDebug("SocketManager: Initing socket at '%s'..", socketPath.c_str());
+
+        // Initialize the socket struct
+        struct sockaddr_un sun;
+        memset(&sun, 0, sizeof sun);
+        sun.sun_family = AF_UNIX;
+
+        size_t maxSize = sizeof(sun.sun_path);
+        int length = snprintf(sun.sun_path, maxSize, "%s", socketPath.c_str());
+        if (length <= 0 || (size_t)length >= maxSize) {
+            string msg;
+            msg += "SocketManager: Invalid socket path ";
+            msg += socketPath;
+            throw std::runtime_error(msg);
+        }
 
         // Create a new local socket
         int socketFd = socket(PF_UNIX, SOCK_STREAM, 0);
         if (socketFd < 0)
             throw std::runtime_error("SocketManager: Failed to open socket\n");
 
-        // TODO: Error if socketPath >= maxLen. Also unlink() here may
-        // try to remove a different file than is passed to sun.sa_data.
-
-        // Remove the previous socket file
-        struct stat sb;
-        stat(socketPath.c_str(), &sb);
-        if (S_ISSOCK(sb.st_mode))
-        {
-            // coverity[toctou]
-            if (unlink(socketPath.c_str()) == -1)
-            {
-                std::string msg("SocketManager: Failed to unlink existing socket file '");
-                msg += socketPath + "': " + strerror(errno);
-                Logger::logWarning(msg.c_str());
-            }
-        }
-
-        // Initialize the socket struct
-        struct sockaddr_un sun;
-        sun.sun_family = AF_UNIX;
-        int maxLen = sizeof(sun.sun_path) - 1;
-        strncpy(sun.sun_path, socketPath.c_str(), maxLen);
-        sun.sun_path[maxLen] = '\0';
-
         // Bind the socket
         if (bind(socketFd, (struct sockaddr*) &sun, sizeof(sun)) < 0)
         {
-            std::string msg("SocketManager: Failed to bind to socket (fd=");
-            std::stringstream ss;
-            ss << socketFd;
-            msg += ss.str() + ")";
+            string msg;
+            msg += "SocketManager: Failed to bind socket to ";
+            msg += socketPath;
             throw std::runtime_error(msg);
         }
 
         // Listen to the socket
         if (listen(socketFd, 10) < 0)
         {
-            std::string msg("SocketManager: Failed to listen to socket (fd=");
-            std::stringstream ss;
-            ss << socketFd;
-            msg += ss.str() + ")";
+            string msg;
+            msg += "SocketManager: Failed to listen to socket ";
+            msg += socketPath;
             throw std::runtime_error(msg);
         }
 
@@ -165,6 +224,6 @@ void SocketManager::addMapping(const string & socketId, int fd)
 
 string SocketManager::socketRootPath() const
 {
-    return m_socketRootPath;
+    return m_socketRootPath + '/';
 }
 

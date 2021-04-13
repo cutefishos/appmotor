@@ -26,6 +26,7 @@
 #include "singleinstance.h"
 #include "socketmanager.h"
 
+#include <deque>
 #include <cstdlib>
 #include <cerrno>
 #include <sys/capability.h>
@@ -147,6 +148,9 @@ void Daemon::run(Booster *booster)
 {
     m_booster = booster;
 
+    if (!m_boostedApplication.empty())
+        m_booster->setBoostedApplication(m_boostedApplication);
+
     // Make sure that LD_BIND_NOW does not prevent dynamic linker to
     // use lazy binding in later dlopen() calls.
     unsetenv("LD_BIND_NOW");
@@ -156,7 +160,7 @@ void Daemon::run(Booster *booster)
 
     // Create socket for the booster
     Logger::logDebug("Daemon: initing socket: %s", booster->boosterType().c_str());
-    m_socketManager->initSocket(booster->boosterType());
+    m_socketManager->initSocket(booster->socketId());
 
     // Daemonize if desired
     if (m_daemon)
@@ -417,7 +421,7 @@ void Daemon::forkBooster(int sleepTime)
         // Initialize and wait for commands from invoker
         try {
             m_booster->initialize(m_initialArgc, m_initialArgv, m_boosterLauncherSocket[1],
-                                  m_socketManager->findSocket(m_booster->boosterType().c_str()),
+                                  m_socketManager->findSocket(m_booster->socketId()),
                                   m_singleInstance, m_bootMode);
         } catch (const std::runtime_error &e) {
             Logger::logError("Booster: Failed to initialize: %s\n", e.what());
@@ -603,33 +607,46 @@ void Daemon::daemonize()
 
 void Daemon::parseArgs(const ArgVect & args)
 {
+    std::deque<string> queue;
     for (ArgVect::const_iterator i(args.begin() + 1); i != args.end(); i++)
-    {
-        if ((*i) == "--boot-mode" || (*i) == "-b")
+        queue.push_back(*i);
+
+    while (!queue.empty()) {
+        string option(queue.front());
+        queue.pop_front();
+
+        if (option == "--boot-mode" || option == "-b")
         {
             Logger::logInfo("Daemon: Boot mode set.");
             m_bootMode = true;
         }
-        else if ((*i) == "--daemon" || (*i) == "-d")
+        else if (option == "--daemon" || option == "-d")
         {
             m_daemon = true;
         }
-        else if ((*i) == "--debug")
+        else if (option == "--debug")
         {
             Logger::setDebugMode(true);
             m_debugMode = true;
         }
-        else if ((*i) == "--help" || (*i) == "-h")
+        else if (option == "--help" || option == "-h")
         {
             usage(args[0].c_str(), EXIT_SUCCESS);
         }
-        else if ((*i) == "--systemd")
+        else if (option == "--systemd")
         {
             m_notifySystemd = true;
         }
+        else if (option == "--application" || option == "-a")
+        {
+            if (!queue.empty()) {
+                m_boostedApplication = queue.front();
+                queue.pop_front();
+            }
+        }
         else
         {
-            if ((*i).find_first_not_of(' ') != string::npos)
+            if (option.find_first_not_of(' ') != string::npos)
                usage(args[0].c_str(), EXIT_FAILURE);
         }
     }
@@ -649,6 +666,8 @@ void Daemon::usage(const char *name, int status)
            "                   Boot mode can be activated also by sending SIGUSR2\n"
            "                   to the launcher.\n"
            "  -d, --daemon     Run as %s a daemon.\n"
+           "  -a, --application <application>\n"
+           "                   Run as application specific booster.\n"
            "  --systemd        Notify systemd when initialization is done\n"
            "  --debug          Enable debug messages and log everything also to stdout.\n"
            "  -h, --help       Print this help.\n\n",

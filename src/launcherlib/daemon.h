@@ -206,6 +206,7 @@ private:
 
     //! True if systemd needs to be notified
     bool m_notifySystemd;
+    string m_boostedApplication;
 
     //! Drop capabilities needed for initialization
     static void dropCapabilities();

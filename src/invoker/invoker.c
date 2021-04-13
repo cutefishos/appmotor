@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -45,6 +46,71 @@
 #include "protocol.h"
 #include "invokelib.h"
 #include "search.h"
+
+// Utility functions
+static char *strip(char *str)
+{
+    if (str) {
+        char *dst = str;
+        char *src = str;
+        while (*src && isspace(*src))
+            ++src;
+        for (;;) {
+            while (*src && !isspace(*src))
+                *dst++ = *src++;
+            while (*src && isspace(*src))
+                ++src;
+            if (!*src)
+                break;
+            *dst++ = ' ';
+        }
+        *dst = 0;
+    }
+    return str;
+}
+
+static char *slice(const char *pos, const char **ppos, const char *delim)
+{
+    char *tok = NULL;
+    if (pos) {
+        const char *beg = pos;
+        while (*pos && !strchr(delim, *pos))
+            ++pos;
+        tok = strndup(beg, pos - beg);
+        if (*pos)
+            ++pos;
+    }
+    if (ppos)
+        *ppos = pos;
+    return tok;
+}
+
+static char **split(const char *str, const char *delim)
+{
+    char **arr = NULL;
+    if (str) {
+        /* Upper limit for token count is number of delimeters + one */
+        int n = 1;
+        for (const char *pos = str; *pos; ++pos)
+            if (strchr(delim, *pos))
+                ++n;
+
+        /* Upper limit for required array size is token count + one */
+        arr = calloc(n + 1, sizeof *arr);
+
+        /* Fill in the array */
+        int i = 0;
+        while (*str) {
+            char *tok = slice(str, &str, delim);
+            if (*strip(tok))
+                arr[i++] = tok;
+            else
+                free(tok);
+        }
+        arr[i] = NULL;
+    }
+    return arr;
+}
 
 // Delay before exit.
 static const unsigned int EXIT_DELAY     = 0;
@@ -70,8 +136,6 @@ static void sigs_init(void);
 
 //! Pipe used to safely catch Unix signals
 static int g_signal_pipe[2];
-
-static const char *g_desktop_file = NULL;
 
 // Forwards Unix signals from invoker to the invoked process
 static void sig_forwarder(int sig)
@@ -182,45 +246,62 @@ static bool invoke_recv_ack(int fd)
 }
 
 // Inits a socket connection for the given application type
-static int invoker_init(const char *app_type)
+static int invoker_init(const char *app_type, const char *app_name)
 {
-    int fd;
-    struct sockaddr_un sun;
+    bool connected = false;
+    int fd = -1;
 
-    fd = socket(PF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-    {
-        error("Failed to open invoker socket for type %s.\n", app_type);
-        return -1;
-    }
+    /* Sanity check args */
+    if (!app_type || strchr(app_type, '/'))
+        goto EXIT;
+    if (app_name && strchr(app_name, '/'))
+        goto EXIT;
 
-    sun.sun_family = AF_UNIX;
-    int maxSize = sizeof(sun.sun_path) - 1;
- 
     const char *runtimeDir = getenv("XDG_RUNTIME_DIR");
-    const char *subpath = "/mapplauncherd/";
-    const int subpathLen = strlen(subpath);
-
-    if (runtimeDir && *runtimeDir)
-        strncpy(sun.sun_path, runtimeDir, maxSize - subpathLen);
-    else
-        strncpy(sun.sun_path, "/tmp", maxSize - subpathLen);
-
-    sun.sun_path[maxSize - subpathLen] = 0;
-    strcat(sun.sun_path, subpath);
-
-    maxSize -= strlen(sun.sun_path);
-    if (maxSize < (int)strlen(app_type) || strchr(app_type, '/'))
-        die(1, "Invalid type of application: %s\n", app_type);
-
-    strcat(sun.sun_path, app_type);
-
-    if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0)
-    {
-        error("Failed to initiate connect on the socket for type %s.\n", app_type);
-        return -1;
+    if (!runtimeDir || !*runtimeDir) {
+        error("XDG_RUNTIME_DIR is not defined.\n");
+        goto EXIT;
     }
 
+    if ((fd = socket(PF_UNIX, SOCK_STREAM, 0)) == -1) {
+        error("Failed to create socket: %m\n");
+        goto EXIT;
+    }
+
+    struct sockaddr_un sun = {
+        .sun_family = AF_UNIX,
+    };
+    int maxSize = sizeof(sun.sun_path);
+    int length;
+
+    if (app_name)
+        length = snprintf(sun.sun_path, maxSize, "%s/mapplauncherd/_%s/%s/socket",
+                          runtimeDir, app_name, app_type);
+    else
+        length = snprintf(sun.sun_path, maxSize, "%s/mapplauncherd/%s",
+                          runtimeDir, app_type);
+
+    if (length <= 0 || length >= maxSize) {
+        if (app_name)
+            error("Invalid booster type: %s / application: %s\n",
+                  app_type, app_name);
+        else
+            error("Invalid booster type: %s\n", app_type);
+        goto EXIT;
+    }
+
+    if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
+        if (errno != ENOENT)
+            warning("connect(\"%s\") failed: %m\n", sun.sun_path);
+        goto EXIT;
+    }
+
+    debug("connected to: %s\n", sun.sun_path);
+    connected = true;
+
+EXIT:
+    if (!connected && fd != -1)
+        close(fd), fd = -1;
     return fd;
 }
 
@@ -565,9 +646,36 @@ static int wait_for_launched_process_to_exit(int socket_fd, bool wait_term)
     return status;
 }
 
+typedef struct InvokeArgs {
+    int           prog_argc;
+    char        **prog_argv;
+    char         *prog_name;
+    const char   *app_type;
+    const char   *app_name;
+    uint32_t      magic_options;
+    bool          wait_term;
+    unsigned int  respawn_delay;
+    bool          test_mode;
+    const char   *desktop_file;
+    unsigned int  exit_delay;
+} InvokeArgs;
+
+#define INVOKE_ARGS_INIT {\
+    .prog_argc     = 0,\
+    .prog_argv     = NULL,\
+    .prog_name     = NULL,\
+    .app_type      = NULL,\
+    .app_name      = "default",\
+    .magic_options = INVOKER_MSG_MAGIC_OPTION_WAIT,\
+    .wait_term     = true,\
+    .respawn_delay = RESPAWN_DELAY,\
+    .test_mode     = false,\
+    .desktop_file  = NULL,\
+    .exit_delay    = EXIT_DELAY,\
+}
+
 // "normal" invoke through a socket connection
-static int invoke_remote(int socket_fd, int prog_argc, char **prog_argv, char *prog_name,
-                         uint32_t magic_options, bool wait_term, unsigned int respawn_delay)
+static int invoke_remote(int socket_fd, const InvokeArgs *args)
 {
     // Get process priority
     errno = 0;
@@ -579,38 +687,33 @@ static int invoke_remote(int socket_fd, int prog_argc, char **prog_argv, char *p
 
     // Connection with launcher process is established,
     // send the data.
-    invoker_send_magic(socket_fd, magic_options);
-    invoker_send_name(socket_fd, prog_name);
-    invoker_send_exec(socket_fd, prog_argv[0]);
-    invoker_send_args(socket_fd, prog_argc, prog_argv);
+    invoker_send_magic(socket_fd, args->magic_options);
+    invoker_send_name(socket_fd, args->prog_name);
+    invoker_send_exec(socket_fd, args->prog_argv[0]);
+    invoker_send_args(socket_fd, args->prog_argc, args->prog_argv);
     invoker_send_prio(socket_fd, prog_prio);
-    invoker_send_delay(socket_fd, respawn_delay);
+    invoker_send_delay(socket_fd, args->respawn_delay);
     invoker_send_ids(socket_fd, getuid(), getgid());
     invoker_send_io(socket_fd);
     invoker_send_env(socket_fd);
     invoker_send_end(socket_fd);
 
-    if (prog_name)
-    {
-        free(prog_name);
-    }
+    if (args->desktop_file)
+        notify_app_lauch(args->desktop_file);
 
-    if (g_desktop_file) {
-        notify_app_lauch(g_desktop_file);
-    }
-    int exit_status = wait_for_launched_process_to_exit(socket_fd, wait_term);
+    int exit_status = wait_for_launched_process_to_exit(socket_fd, args->wait_term);
     return exit_status;
 }
 
-static void invoke_fallback(char **prog_argv, char *prog_name, bool wait_term)
+static void invoke_fallback(const InvokeArgs *args)
 {
     // Connection with launcher is broken,
     // try to launch application via execve
     warning("Connection with launcher process is broken. \n");
-    error("Start application %s as a binary executable without launcher...\n", prog_name);
+    error("Start application %s as a binary executable without launcher...\n", args->prog_name);
 
     // Fork if wait_term not set
-    if(!wait_term)
+    if (!args->wait_term)
     {
         // Fork a new process
         pid_t newPid = fork();
@@ -627,91 +730,87 @@ static void invoke_fallback(char **prog_argv, char *prog_name, bool wait_term)
     }
 
     // Exec the process image
-    execve(prog_name, prog_argv, environ);
+    execve(args->prog_name, args->prog_argv, environ);
     perror("execve");   /* execve() only returns on error */
     exit(EXIT_FAILURE);
 }
 
 // Invokes the given application
-static int invoke(int prog_argc, char **prog_argv, char *prog_name,
-                  const char *app_type, uint32_t magic_options, bool wait_term, unsigned int respawn_delay,
-                  bool test_mode)
+static int invoke(InvokeArgs *args)
 {
-    int status = 0;
-    if (prog_name && prog_argv)
-    {
-        //If TEST_MODE_CONTROL_FILE doesn't exists switch off test mode
-        if (test_mode && access(TEST_MODE_CONTROL_FILE, F_OK) != 0)
-        {
-            test_mode = false;
-            info("Invoker test mode is not enabled.\n");
-        }
+    /* Note: Contents of 'args' are assumed to have been
+     *       checked and sanitized before invoke() call.
+     */
 
-        // The app can be launched with a comma delimited list of boosters to attempt.
+    int status = EXIT_FAILURE;
 
-        char *app_type_list = strdup(app_type);
-        char *saveptr = NULL;
-        char *token;
+    /* The app can be launched with a comma delimited list of
+     * booster types to attempt.
+     */
+    char **types = split(args->app_type, ",");
 
-        int fd = -1;
-        for (token = strtok_r(app_type_list, ",", &saveptr); fd == -1 && token != NULL; token = strtok_r(NULL, ",", &saveptr))
-        {
-            app_type = token;
-            if (app_type != app_type_list) {
-                info("Trying fallback type %s.\n", app_type);
-            }
-            fd = invoker_init(app_type);
-        }
+    int fd = -1;
 
-        if (fd == -1)
-        {
-            // This is a fallback if connection with the launcher
-            // process is broken
+    /* Session booster is a special case:
+     * - is never going to be application specific
+     * - can use and still uses legacy socket path
+     * - mutually exclusive with all other choises
+     * - no fallbacks should be utilized
+     */
 
-            // if the attempt was to use the generic booster, and that failed,
-            // then give up and start unboosted. otherwise, make an attempt to
-            // use the generic booster before not boosting. this means single
-            // instance support (for instance) will still work.
-            if (strcmp(app_type, "generic") == 0)
-            {
-                warning("Can't try fall back to generic, already using it\n");
-                invoke_fallback(prog_argv, prog_argv[0], wait_term);
-            }
-            else
-            {
-                warning("Booster %s is not available. Falling back to generic.\n", app_type);
-                invoke(prog_argc, prog_argv, prog_argv[0], "generic", magic_options, wait_term, respawn_delay, test_mode);
-            }
-        }
-        // "normal" invoke through a socket connetion
-        else
-        {
-            status = invoke_remote(fd, prog_argc, prog_argv, prog_name,
-                                   magic_options, wait_term, respawn_delay);
-            close(fd);
-        }
-
-        free(app_type_list);
+    bool tried_session = false;
+    for (size_t i = 0; !tried_session && types[i]; ++i) {
+        if (strcmp(types[i], "session"))
+            continue;
+        tried_session = true;
+        fd = invoker_init(types[i], NULL);
     }
-    
+
+    /* Application aware boosters
+     * - have fallback strategy, but it
+     * - must not cross application vs "default" boundary
+     */
+    if (fd == -1 && !tried_session) {
+        bool tried_generic = false;
+        for (size_t i = 0; fd == -1 && types[i]; ++i) {
+            if (!strcmp(types[i], "generic"))
+                tried_generic = true;
+            fd = invoker_init(types[i], args->app_name);
+        }
+        if (fd == -1 && !tried_generic)
+            fd = invoker_init("generic", args->app_name);
+    }
+
+    if (fd != -1) {
+        /* "normal" invoke through a socket connetion */
+        status = invoke_remote(fd, args);
+        close(fd);
+    } else if (tried_session) {
+        warning("Launch failed, session booster is not available.\n");
+    } else if (strcmp(args->app_name, "default")) {
+        /* Boosters that deal explicitly with one application only
+         * must be assumed to run within sandbox -> skipping boosting
+         * would also skip sandboxing -> no direct launch fallback
+         */
+        warning("Launch failed, application specific booster is not available.\n");
+    } else {
+        /* Give up and start unboosted */
+        warning("Also fallback boosters failed, launch without boosting.\n");
+        invoke_fallback(args);
+        /* Returns only in case of: no-wait was specified and fork succeeded */
+        status = EXIT_SUCCESS;
+    }
+
+    for (int i = 0; types[i]; ++i)
+        free(types[i]);
+    free(types);
+
     return status;
 }
 
 int main(int argc, char *argv[])
 {
-    const char   *app_type      = NULL;
-    int           prog_argc     = 0;
-    uint32_t      magic_options = 0;
-    bool          wait_term     = true;
-    unsigned int  delay         = EXIT_DELAY;
-    unsigned int  respawn_delay = RESPAWN_DELAY;
-    char        **prog_argv     = NULL;
-    char         *prog_name     = NULL;
-    struct stat   file_stat;
-    bool test_mode = false;
-
-    // wait-term parameter by default
-    magic_options |= INVOKER_MSG_MAGIC_OPTION_WAIT;
+    InvokeArgs args = INVOKE_ARGS_INIT;
 
     // Called with a different name (old way of using invoker) ?
     if (!strstr(argv[0], PROG_NAME_INVOKER) )
@@ -733,6 +832,7 @@ int main(int argc, char *argv[])
         {"daemon-mode",      no_argument,       NULL, 'o'}, // Legacy alias
         {"test-mode",        no_argument,       NULL, 'T'},
         {"type",             required_argument, NULL, 't'},
+        {"application",      required_argument, NULL, 'a'},
         {"delay",            required_argument, NULL, 'd'},
         {"respawn",          required_argument, NULL, 'r'},
         {"splash",           required_argument, NULL, 'S'},
@@ -745,7 +845,7 @@ int main(int argc, char *argv[])
     // The use of + for POSIXLY_CORRECT behavior is a GNU extension, but avoids polluting
     // the environment
     int opt;
-    while ((opt = getopt_long(argc, argv, "+hcwnGDsoTd:t:r:S:L:F:", longopts, NULL)) != -1)
+    while ((opt = getopt_long(argc, argv, "+hcwnGDsoTd:t:a:r:S:L:F:", longopts, NULL)) != -1)
     {
         switch(opt)
         {
@@ -758,41 +858,45 @@ int main(int argc, char *argv[])
             break;
 
         case 'o':
-            magic_options |= INVOKER_MSG_MAGIC_OPTION_OOM_ADJ_DISABLE;
+            args.magic_options |= INVOKER_MSG_MAGIC_OPTION_OOM_ADJ_DISABLE;
             break;
 
         case 'n':
-            wait_term = false;
-            magic_options &= (~INVOKER_MSG_MAGIC_OPTION_WAIT);
+            args.wait_term = false;
+            args.magic_options &= (~INVOKER_MSG_MAGIC_OPTION_WAIT);
             break;
 
         case 'G':
-            magic_options |= INVOKER_MSG_MAGIC_OPTION_DLOPEN_GLOBAL;
+            args.magic_options |= INVOKER_MSG_MAGIC_OPTION_DLOPEN_GLOBAL;
             break;
 
         case 'D':
-            magic_options |= INVOKER_MSG_MAGIC_OPTION_DLOPEN_DEEP;
+            args.magic_options |= INVOKER_MSG_MAGIC_OPTION_DLOPEN_DEEP;
             break;
 
         case 'T':
-            test_mode = true;
+            args.test_mode = true;
             break;
 
         case 't':
-            app_type = optarg;
+            args.app_type = optarg;
+            break;
+
+        case 'a':
+            args.app_name = optarg;
             break;
 
         case 'd':
-            delay = get_delay(optarg, "delay", MIN_EXIT_DELAY, MAX_EXIT_DELAY);
+            args.exit_delay = get_delay(optarg, "delay", MIN_EXIT_DELAY, MAX_EXIT_DELAY);
             break;
 
         case 'r':
-            respawn_delay = get_delay(optarg, "respawn delay",
+            args.respawn_delay = get_delay(optarg, "respawn delay",
                                       MIN_RESPAWN_DELAY, MAX_RESPAWN_DELAY);
             break;
 
         case 's':
-            magic_options |= INVOKER_MSG_MAGIC_OPTION_SINGLE_INSTANCE;
+            args.magic_options |= INVOKER_MSG_MAGIC_OPTION_SINGLE_INSTANCE;
             break;
 
         case 'S':
@@ -801,7 +905,7 @@ int main(int argc, char *argv[])
             break;
 
         case 'F':
-            g_desktop_file = optarg;
+            args.desktop_file = optarg;
             break;
 
         case '?':
@@ -810,55 +914,61 @@ int main(int argc, char *argv[])
     }
 
     // Option processing stops as soon as application name is encountered
-    if (optind < argc)
-    {
-        prog_name = search_program(argv[optind]);
-        prog_argc = argc - optind;
-        prog_argv = &argv[optind];
 
-        // Force argv[0] of application to be the absolute path to allow the
-        // application to find out its installation directory from there
-        prog_argv[0] = prog_name;
+    args.prog_argc = argc - optind;
+    args.prog_argv = &argv[optind];
+
+    if (args.prog_argc < 1) {
+        report(report_error, "No command line to invoke was given.\n");
+        exit(EXIT_FAILURE);
     }
 
-    // Check if application name isn't defined
-    if (!prog_name)
-    {
-        report(report_error, "Application's name is not defined.\n");
-        usage(1);
-    }
+    // Force argv[0] of application to be the absolute path to allow the
+    // application to find out its installation directory from there
+    args.prog_argv[0] = search_program(args.prog_argv[0]);
 
     // Check if application exists
-    if (stat(prog_name, &file_stat))
-    {
-        report(report_error, "%s: not found\n", prog_name);
+    struct stat file_stat;
+    if (stat(args.prog_argv[0], &file_stat) == -1) {
+        report(report_error, "%s: not found: %m\n", args.prog_argv[0]);
         return EXIT_STATUS_APPLICATION_NOT_FOUND;
     }
 
-    // Check that 
-    if (!S_ISREG(file_stat.st_mode) && !S_ISLNK(file_stat.st_mode))
-    {
-        report(report_error, "%s: not a file\n", prog_name);
+    // Check that application is regular file (or symlink to such)
+    if (!S_ISREG(file_stat.st_mode)) {
+        report(report_error, "%s: not a file\n", args.prog_argv[0]);
         return EXIT_STATUS_APPLICATION_NOT_FOUND;
     }
 
     // If it's a launcher, append its first argument to the name
     // (at this point, we have already checked if it exists and is a file)
-    if (strcmp(prog_name, "/usr/bin/sailfish-qml") == 0) {
-        if (prog_argc < 2) {
-            report(report_error, "%s: requires an argument\n", prog_name);
+    if (strcmp(args.prog_argv[0], "/usr/bin/sailfish-qml") == 0) {
+        if (args.prog_argc < 2) {
+            report(report_error, "%s: requires an argument\n", args.prog_argv[0]);
             return EXIT_STATUS_APPLICATION_NOT_FOUND;
         }
 
-        // Must not free() the existing prog_name, as it's pointing to prog_argv[0]
-        prog_name = (char *)malloc(strlen(prog_argv[0]) + strlen(prog_argv[1]) + 2);
-        sprintf(prog_name, "%s %s", prog_argv[0], prog_argv[1]);
+        if (asprintf(&args.prog_name, "%s %s", args.prog_argv[0], args.prog_argv[1]) < 0)
+            exit(EXIT_FAILURE);
+    } else {
+        if (!(args.prog_name = strdup(args.prog_argv[0])))
+            exit(EXIT_FAILURE);
     }
 
-    if (!app_type)
-    {
+    if (!args.app_type) {
         report(report_error, "Application type must be specified with --type.\n");
         usage(1);
+    }
+
+    if (!args.app_name) {
+        report(report_error, "Application name must be specified with --application.\n");
+        usage(1);
+    }
+
+    // If TEST_MODE_CONTROL_FILE doesn't exists switch off test mode
+    if (args.test_mode && access(TEST_MODE_CONTROL_FILE, F_OK) != 0) {
+        args.test_mode = false;
+        info("Invoker test mode is not enabled.\n");
     }
 
     if (pipe(g_signal_pipe) == -1)
@@ -868,15 +978,14 @@ int main(int argc, char *argv[])
     }
 
     // Send commands to the launcher daemon
-    info("Invoking execution: '%s'\n", prog_name);
-    int ret_val = invoke(prog_argc, prog_argv, prog_name, app_type, magic_options, wait_term, respawn_delay, test_mode);
+    info("Invoking execution: '%s'\n", args.prog_name);
+    int ret_val = invoke(&args);
 
     // Sleep for delay before exiting
-    if (delay)
-    {
+    if (args.exit_delay) {
         // DBUS cannot cope some times if the invoker exits too early.
-        debug("Delaying exit for %d seconds..\n", delay);
-        sleep(delay);
+        debug("Delaying exit for %d seconds..\n", args.exit_delay);
+        sleep(args.exit_delay);
     }
 
     return ret_val;

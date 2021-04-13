@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2012 - 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -107,6 +109,11 @@ public:
      */
     virtual const string & boosterType() const = 0;
 
+    const string &boostedApplication() const;
+    void setBoostedApplication(const string &application);
+
+    const string socketId() const;
+
     //! Get invoker's pid
     pid_t invokersPid();
 
@@ -212,6 +219,9 @@ private:
 
     //! Original space available for arguments
     int m_spaceAvailable;
+
+    //! Application name when applicable, or "default"
+    string m_boostedApplication;
 
     //! True, if being run in boot mode.
     bool m_bootMode;
