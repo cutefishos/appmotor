@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2012 - 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -25,7 +27,7 @@
 void invoke_send_msg(int fd, uint32_t msg);
 bool invoke_recv_msg(int fd, uint32_t *msg);
 
-void invoke_send_str(int fd, char *str);
+void invoke_send_str(int fd, const char *str);
 
 // Existence of the test mode control file is checked
 // to enable test mode.

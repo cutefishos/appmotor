@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2021 Open Mobile Platform LLC.
+** Copyright (c) 2021 Jolla Ltd.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -26,10 +28,21 @@
 #include "report.h"
 #include "invokelib.h"
 
+static void invoke_send_or_die(int fd, const void *data, size_t size)
+{
+    if (write(fd, data, size) != (ssize_t)size) {
+        const char m[] = "*** socket write failure, terminating\n";
+        if (write(STDERR_FILENO, m, sizeof m - 1) == -1) {
+            // dontcare
+        }
+        _exit(EXIT_FAILURE);
+    }
+}
+
 void invoke_send_msg(int fd, uint32_t msg)
 {
     debug("%s: %08x\n", __FUNCTION__, msg);
-    write(fd, &msg, sizeof(msg));
+    invoke_send_or_die(fd, &msg, sizeof(msg));
 }
 
 bool invoke_recv_msg(int fd, uint32_t *msg)
@@ -58,20 +71,17 @@ bool invoke_recv_msg(int fd, uint32_t *msg)
     }
 }
 
-void invoke_send_str(int fd, char *str)
+void invoke_send_str(int fd, const char *str)
 {
-    if (str)
-    {
-        uint32_t size;
+    if (!str)
+        str = "";
+    uint32_t size = strlen(str) + 1;
 
-        /* Send size. */
-        size = strlen(str) + 1;
-        invoke_send_msg(fd, size);
+    /* Send size. */
+    invoke_send_msg(fd, size);
 
-        debug("%s: '%s'\n", __FUNCTION__, str);
+    debug("%s: '%s'\n", __FUNCTION__, str);
 
-        /* Send the string. */
-        write(fd, str, size);
-    }
+    /* Send the string. */
+    invoke_send_or_die(fd, str, size);
 }
-

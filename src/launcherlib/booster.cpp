@@ -1,8 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
-** Copyright (C) 2013 - 2021 Jolla Ltd.
-** Copyright (C) 2018 - 2020 Open Mobile Platform LLC.
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2013 - 2021 Jolla Ltd.
+** Copyright (c) 2018 - 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -478,7 +478,16 @@ void Booster::setEnvironmentBeforeLaunch()
 
     // Set PWD
     const char * pwd = getenv("PWD");
-    if (pwd) chdir(pwd);
+    if (pwd) {
+        if (chdir(pwd) == -1) {
+            Logger::logWarning("Booster: chdir(\"%s\") failed: %m", pwd);
+            pwd = "/";
+            if (chdir(pwd) == -1) {
+                Logger::logWarning("Booster: chdir(\"%s\") failed: %m", pwd);
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
 
     Logger::logDebug("Booster: launching process: '%s' ", m_appData->fileName().c_str());
 }

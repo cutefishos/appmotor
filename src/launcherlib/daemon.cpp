@@ -1,8 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
-** Copyright (C) 2013 - 2021 Jolla Ltd.
-** Copyright (C) 2020 Open Mobile Platform LLC.
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2013 - 2021 Jolla Ltd.
+** Copyright (c) 2020 - 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -53,43 +53,39 @@ extern char ** environ;
 Daemon * Daemon::m_instance = NULL;
 const int Daemon::m_boosterSleepTime = 2;
 
-const std::string Daemon::m_stateDir = std::string(getenv("XDG_RUNTIME_DIR"))+"/applauncherd";
-const std::string Daemon::m_stateFile = Daemon::m_stateDir + "/saved-state";
-
-static void sigChldHandler(int)
+static void write_dontcare(int fd, const void *data, size_t size)
 {
-    char v = SIGCHLD;
-    write(Daemon::instance()->sigPipeFd(), &v, 1);
+    ssize_t rc = write(fd, data, size);
+    if (rc == -1)
+        Logger::logWarning("write to fd=%d failed: %m", fd);
+    else if ((size_t)rc != size)
+        Logger::logWarning("write to fd=%d failed", fd);
 }
 
-static void sigTermHandler(int)
+static void write_to_signal_pipe(int sig)
 {
-    char v = SIGTERM;
-    write(Daemon::instance()->sigPipeFd(), &v, 1);
+    char v = (char)sig;
+    if (write(Daemon::instance()->sigPipeFd(), &v, 1) != 1) {
+        /* If we can't write to internal signal forwarding
+         * pipe, we might as well quit */
+        const char m[] = "*** signal pipe write failure - terminating\n";
+        if (write(STDERR_FILENO, m, sizeof m - 1) == -1) {
+            // dontcare
+        }
+        _exit(EXIT_FAILURE);
+    }
 }
 
-static void sigUsr1Handler(int)
+static int read_from_signal_pipe(int fd)
 {
-    char v = SIGUSR1;
-    write(Daemon::instance()->sigPipeFd(), &v, 1);
-}
-
-static void sigUsr2Handler(int)
-{
-    char v = SIGUSR2;
-    write(Daemon::instance()->sigPipeFd(), &v, 1);
-}
-
-static void sigPipeHandler(int)
-{
-    char v = SIGPIPE;
-    write(Daemon::instance()->sigPipeFd(), &v, 1);
-}
-
-static void sigHupHandler(int)
-{
-    char v = SIGHUP;
-    write(Daemon::instance()->sigPipeFd(), &v, 1);
+    char sig = 0;
+    if (read(fd, &sig, 1) != 1) {
+        /* If we can't read from internal signal forwarding
+         * pipe, we might as well quit */
+        Logger::logError("signal pipe read failure - terminating\n");
+        exit(EXIT_FAILURE);
+    }
+    return sig;
 }
 
 Daemon::Daemon(int & argc, char * argv[]) :
@@ -108,12 +104,12 @@ Daemon::Daemon(int & argc, char * argv[]) :
 
     // Install signal handlers. The original handlers are saved
     // in the daemon instance so that they can be restored in boosters.
-    setUnixSignalHandler(SIGCHLD, sigChldHandler); // reap zombies
-    setUnixSignalHandler(SIGTERM, sigTermHandler); // exit launcher
-    setUnixSignalHandler(SIGUSR1, sigUsr1Handler); // enter normal mode from boot mode
-    setUnixSignalHandler(SIGUSR2, sigUsr2Handler); // enter boot mode (same as --boot-mode)
-    setUnixSignalHandler(SIGPIPE, sigPipeHandler); // broken invoker's pipe
-    setUnixSignalHandler(SIGHUP,  sigHupHandler);  // re-exec
+    setUnixSignalHandler(SIGCHLD, write_to_signal_pipe); // reap zombies
+    setUnixSignalHandler(SIGTERM, write_to_signal_pipe); // exit launcher
+    setUnixSignalHandler(SIGUSR1, write_to_signal_pipe); // enter normal mode from boot mode
+    setUnixSignalHandler(SIGUSR2, write_to_signal_pipe); // enter boot mode (same as --boot-mode)
+    setUnixSignalHandler(SIGPIPE, write_to_signal_pipe); // broken invoker's pipe
+    setUnixSignalHandler(SIGHUP,  write_to_signal_pipe); // re-exec
 
     if (!Daemon::m_instance)
     {
@@ -210,8 +206,7 @@ void Daemon::run(Booster *booster)
             if (FD_ISSET(m_sigPipeFd[0], &rfds))
             {
                 Logger::logDebug("Daemon: FD_ISSET(m_sigPipeFd[0])");
-                char dataReceived;
-                read(m_sigPipeFd[0], &dataReceived, 1);
+                int dataReceived = read_from_signal_pipe(m_sigPipeFd[0]);
 
                 switch (dataReceived)
                 {
@@ -380,6 +375,10 @@ void Daemon::forkBooster(int sleepTime)
 
     if (newPid == 0) /* Child process */
     {
+        // Will be reopened with new identity when/if
+        // there is something to report
+        Logger::closeLog();
+
         // Restore used signal handlers
         restoreUnixSignalHandlers();
 
@@ -483,9 +482,10 @@ void Daemon::reapZombies()
                     FdMap::iterator fd = m_boosterPidToInvokerFd.find(pid);
                     if (fd != m_boosterPidToInvokerFd.end())
                     {
-                        write((*fd).second, &INVOKER_MSG_EXIT, sizeof(uint32_t));
-                        int exitStatus = WEXITSTATUS(status);
-                        write((*fd).second, &exitStatus, sizeof(int));
+                        uint32_t command = INVOKER_MSG_EXIT;
+                        uint32_t argument = WEXITSTATUS(status);
+                        write_dontcare((*fd).second, &command, sizeof command);
+                        write_dontcare((*fd).second, &argument, sizeof argument);
                         close((*fd).second);
                         m_boosterPidToInvokerFd.erase(fd);
                     }

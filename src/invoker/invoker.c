@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2012 - 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -55,7 +57,6 @@ static const unsigned int RESPAWN_DELAY     = 1;
 static const unsigned int MIN_RESPAWN_DELAY = 0;
 static const unsigned int MAX_RESPAWN_DELAY = 10;
 
-static const unsigned char EXIT_STATUS_APPLICATION_CONNECTION_LOST = 0xfa;
 static const unsigned char EXIT_STATUS_APPLICATION_NOT_FOUND = 0x7f;
 
 // Environment
@@ -99,7 +100,8 @@ static void sig_forwarder(int sig)
 
         // Write signal number to the self-pipe
         char signal_id = (char) sig;
-        write(g_signal_pipe[1], &signal_id, 1);
+        if (write(g_signal_pipe[1], &signal_id, 1) != 1)
+            _exit(EXIT_FAILURE);
 
         // Send the signal to itself using the default handler
         raise(sig);
@@ -208,7 +210,7 @@ static int invoker_init(const char *app_type)
     strcat(sun.sun_path, subpath);
 
     maxSize -= strlen(sun.sun_path);
-    if (maxSize < strlen(app_type) || strchr(app_type, '/'))
+    if (maxSize < (int)strlen(app_type) || strchr(app_type, '/'))
         die(1, "Invalid type of application: %s\n", app_type);
 
     strcat(sun.sun_path, app_type);
@@ -274,7 +276,7 @@ static void invoker_send_magic(int fd, uint32_t options)
 }
 
 // Sends the process name to be invoked.
-static void invoker_send_name(int fd, char *name)
+static void invoker_send_name(int fd, const char *name)
 {
     invoke_send_msg(fd, INVOKER_MSG_NAME);
     invoke_send_str(fd, name);
@@ -546,7 +548,8 @@ static int wait_for_launched_process_to_exit(int socket_fd, bool wait_term)
                 {
                     // Clean up the pipe
                     char signal_id;
-                    read(g_signal_pipe[0], &signal_id, sizeof(signal_id));
+                    if (read(g_signal_pipe[0], &signal_id, 1) != 1)
+                        exit(EXIT_FAILURE);
 
                     // Set signals forwarding to the invoked process again
                     // (they were reset by the signal forwarder).
