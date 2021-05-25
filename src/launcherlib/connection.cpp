@@ -1,7 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
-** Copyright (C) 2021 Jolla Ltd.
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -620,7 +621,7 @@ std::string Connection::getExecutablePath(pid_t pid)
     static_assert(sizeof(INVOKER_PATH) < sizeof(exe));
     path << "/proc/" << pid << "/exe";
     len = readlink(path.str().c_str(), exe, sizeof(exe));
-    if (len < 0 || len >= sizeof(exe))
+    if (len < 0 || (size_t)len >= sizeof(exe))
     {
         Logger::logError("Connection: %s: readlink failed for pid %d: %s", __FUNCTION__, pid, strerror(errno));
         return std::string();

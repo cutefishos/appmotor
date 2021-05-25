@@ -1,8 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
-** Copyright (C) 2013 - 2021 Jolla Ltd.
-** Copyright (C) 2018 - 2020 Open Mobile Platform LLC.
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2013 - 2021 Jolla Ltd.
+** Copyright (c) 2018 - 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -58,6 +58,7 @@ Booster::Booster() :
     m_oldPriority(0),
     m_oldPriorityOk(false),
     m_spaceAvailable(0),
+    m_boostedApplication("default"),
     m_bootMode(false)
 {
     Connection::setMountNamespace(Connection::getMountNamespace(getpid()));
@@ -478,7 +479,16 @@ void Booster::setEnvironmentBeforeLaunch()
 
     // Set PWD
     const char * pwd = getenv("PWD");
-    if (pwd) chdir(pwd);
+    if (pwd) {
+        if (chdir(pwd) == -1) {
+            Logger::logWarning("Booster: chdir(\"%s\") failed: %m", pwd);
+            pwd = "/";
+            if (chdir(pwd) == -1) {
+                Logger::logWarning("Booster: chdir(\"%s\") failed: %m", pwd);
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
 
     Logger::logDebug("Booster: launching process: '%s' ", m_appData->fileName().c_str());
 }
@@ -576,6 +586,62 @@ bool Booster::popPriority()
 
     return false;
 }
+
+const string &Booster::boostedApplication() const
+{
+    return m_boostedApplication;
+}
+
+void Booster::setBoostedApplication(const string &application)
+{
+    string filtered;
+    filtered.reserve(application.size());
+    bool alnum = false;
+    bool error = false;
+    for (auto chr : application) {
+        switch (chr) {
+        case 'A' ... 'Z':
+            chr += 'a' - 'A';
+            // FALLTHRU
+        case 'a' ... 'z':
+        case '0' ... '9':
+            alnum = true;
+            // FALLTHRU
+        case '-':
+        case '_':
+            if (alnum) {
+                filtered.push_back(chr);
+                break;
+            }
+            // FALLTHRU
+        default:
+            error = true;
+            break;
+        }
+    }
+    if (error || filtered.empty())
+        Logger::logError("Rejected invalid application name '%s'", application.c_str());
+    else
+        m_boostedApplication = filtered;
+}
+
+const string Booster::socketId() const
+{
+    string id;
+    if (boosterType() == "silica-session") {
+        // Session is never going to be application specific
+        // -> retain legacy socket path
+        id += boosterType();
+    } else {
+        id += '_';
+        id += boostedApplication();
+        id += '/';
+        id += boosterType();
+        id += "/socket";
+    }
+    return id;
+}
+
 
 pid_t Booster::invokersPid()
 {

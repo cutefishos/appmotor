@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2013 - 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -73,7 +75,7 @@ void Logger::logDebug(const char * format, ...)
 {
     if (m_debugMode)
     {
-        va_list(ap);
+        va_list ap;
         va_start(ap, format);
         writeLog(LOG_DEBUG, format, ap);
         va_end(ap);
@@ -82,7 +84,7 @@ void Logger::logDebug(const char * format, ...)
 
 void Logger::logInfo(const char * format, ...)
 {
-    va_list(ap);
+    va_list ap;
     va_start(ap, format);
     writeLog(LOG_INFO, format, ap); 
     va_end(ap);
@@ -92,7 +94,7 @@ void Logger::logInfo(const char * format, ...)
 
 void Logger::logWarning(const char * format, ...)
 {
-    va_list(ap);
+    va_list ap;
     va_start(ap, format);
     writeLog(LOG_WARNING, format, ap);
     va_end(ap);
@@ -100,7 +102,7 @@ void Logger::logWarning(const char * format, ...)
 
 void Logger::logError(const char * format, ...)
 {
-    va_list(ap);
+    va_list ap;
     va_start(ap, format);
     writeLog(LOG_ERR, format, ap);
     va_end(ap);

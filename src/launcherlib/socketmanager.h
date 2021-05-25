@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2012 - 2021 Jolla Ltd.
+** Copyright (c) 2021 Open Mobile Platform LLC.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -37,6 +39,8 @@ class DECL_EXPORT SocketManager
 {
 public:
     SocketManager();
+
+    string prepareSocket(const string &socketId) const;
 
     /*! \brief Initialize a file socket.
      *  \param socketId Path to the socket file.

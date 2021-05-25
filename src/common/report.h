@@ -1,6 +1,8 @@
 /***************************************************************************
 **
-** Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2010 Nokia Corporation and/or its subsidiary(-ies).
+** Copyright (c) 2021 Open Mobile Platform LLC.
+** Copyright (c) 2021 Jolla Ltd.
 ** All rights reserved.
 ** Contact: Nokia Corporation (directui@nokia.com)
 **
@@ -41,12 +43,12 @@ enum report_type {
 };
 
 extern void report_set_output(enum report_output new_output);
-extern void report(enum report_type type, const char *msg, ...);
+extern void report(enum report_type type, const char *msg, ...) __attribute__((format(printf, 2, 3)));
 
 #ifndef DEBUG_LOGGING_DISABLED
 #define debug(msg, ...) report(report_debug, msg, ##__VA_ARGS__)
 #else
-#define debug(...)
+#define debug(...) do {} while (0)
 #endif
 
 #define info(msg, ...) report(report_info, msg, ##__VA_ARGS__)
