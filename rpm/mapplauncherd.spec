@@ -1,6 +1,6 @@
 Name:       mapplauncherd
 Summary:    Application launcher for fast startup
-Version:    4.1.31
+Version:    4.2.0
 Release:    1
 License:    LGPLv2+
 URL:        https://git.merproject.org/mer-core/mapplauncherd
