@@ -25,50 +25,83 @@
 #include <cstdarg>
 #include <cstdio>
 #include <unistd.h>
+#include <ctype.h>
 
 #include "coverage.h"
 
 bool Logger::m_isOpened  = false;
 bool Logger::m_debugMode = false;
 
+static char *strip(char *str)
+{
+    if (str) {
+        char *dst = str;
+        char *src = str;
+        while (*src && isspace(*src))
+            ++src;
+        for (;;) {
+            while (*src && !isspace(*src))
+                *dst++ = *src++;
+            while (*src && isspace(*src))
+                ++src;
+            if (!*src)
+                break;
+            *dst++ = ' ';
+        }
+        *dst = 0;
+    }
+    return str;
+}
+
+static bool useSyslog()
+{
+    static bool checked = false;
+    static bool value = false;
+    if (!checked) {
+        checked = true;
+        value = !isatty(STDIN_FILENO);
+    }
+    return value;
+}
+
 void Logger::openLog(const char * progName)
 {
     if (!progName)
         progName = "mapplauncherd";
 
-    if (Logger::m_isOpened)
-    {
-        Logger::closeLog();
+    if (useSyslog()) {
+        if (Logger::m_isOpened)
+            Logger::closeLog();
+        openlog(progName, LOG_PID, LOG_DAEMON);
+        Logger::m_isOpened = true;
     }
-    openlog(progName, LOG_PID, LOG_DAEMON);
-    Logger::m_isOpened = true;
 }
 
 void Logger::closeLog()
 {
-    if (Logger::m_isOpened)
-    {
-        // Close syslog
-        closelog();
+    if (useSyslog()) {
+        if (Logger::m_isOpened)
+            closelog();
         Logger::m_isOpened = false;
     }
 }
 
 void Logger::writeLog(const int priority, const char * format, va_list ap) 
 {
-    // In debug mode everything is printed also to stdout
-    if (m_debugMode)
-    {
-        vprintf(format, ap);
-        printf("\n");
+    if (useSyslog()) {
+        if (!Logger::m_isOpened)
+            Logger::openLog();
+        vsyslog(priority, format, ap);
+    } else {
+        char *msg = 0;
+        if (vasprintf(&msg, format, ap) < 0)
+            msg = 0;
+        else
+            strip(msg);
+        fprintf(stderr, "BOOSTER(%d): %s\n", (int)getpid(), msg ?: format);
+        fflush(stderr);
+        free(msg);
     }
-
-    // Print to syslog
-    if (!Logger::m_isOpened)
-    {
-        Logger::openLog(); //open log with default name
-    }
-    vsyslog(priority, format, ap);
 }
 
 void Logger::logDebug(const char * format, ...)

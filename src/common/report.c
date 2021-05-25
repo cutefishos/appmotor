@@ -21,10 +21,33 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <syslog.h>
+#include <unistd.h>
+#include <ctype.h>
 
 #include "report.h"
 
-static enum report_output output = report_console;
+static enum report_output output = report_guess;
+
+static char *strip(char *str)
+{
+    if (str) {
+        char *dst = str;
+        char *src = str;
+        while (*src && isspace(*src))
+            ++src;
+        for (;;) {
+            while (*src && !isspace(*src))
+                *dst++ = *src++;
+            while (*src && isspace(*src))
+                ++src;
+            if (!*src)
+                break;
+            *dst++ = ' ';
+        }
+        *dst = 0;
+    }
+    return str;
+}
 
 void report_set_output(enum report_output new_output)
 {
@@ -71,20 +94,19 @@ static void vreport(enum report_type type, const char *msg, va_list arg)
 
     vsnprintf(str, sizeof(str), msg, arg);
 
-    // report errors and fatals to syslog even if it's not default output
-    if ((output != report_syslog) &&
-        ((type == report_error) || (type == report_fatal)))
-    {
-        enum report_output old_output = output;
-        report_set_output(report_syslog);
-        syslog(log_type, "%s%s", str_type, str);
-        report_set_output(old_output);
+    if (output == report_guess) {
+        if (isatty(STDIN_FILENO))
+            output = report_console;
+        else
+            output = report_syslog;
     }
 
-    if (output == report_console)
-        printf("%s: %s%s", PROG_NAME_INVOKER, str_type, str);
-    else if (output == report_syslog)
+    if (output == report_console) {
+        fprintf(stderr, "%s: %s%s\n", PROG_NAME_INVOKER, str_type, strip(str));
+        fflush(stderr);
+    } else if (output == report_syslog) {
         syslog(log_type, "%s%s", str_type, str);
+    }
 }
 
 void report(enum report_type type, const char *msg, ...)

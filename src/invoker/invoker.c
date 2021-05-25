@@ -40,12 +40,20 @@
 #include <limits.h>
 #include <getopt.h>
 #include <fcntl.h>
+#include <time.h>
+#include <poll.h>
 #include <dbus/dbus.h>
 
 #include "report.h"
 #include "protocol.h"
 #include "invokelib.h"
 #include "search.h"
+
+/* Setting VERBOSE_SIGNALS to non-zero value logs receiving of
+ * async-signals - which is useful only when actively debugging
+ * booster / invoker interoperation.
+ */
+#define VERBOSE_SIGNALS 0
 
 // Utility functions
 static char *strip(char *str)
@@ -135,75 +143,34 @@ static void sigs_restore(void);
 static void sigs_init(void);
 
 //! Pipe used to safely catch Unix signals
-static int g_signal_pipe[2];
+static int g_signal_pipe[2] = { -1, -1 };
 
 // Forwards Unix signals from invoker to the invoked process
 static void sig_forwarder(int sig)
 {
-    if (g_invoked_pid >= 0)
-    {
-        if (kill(g_invoked_pid, sig) != 0)
-        {
-            if (sig == SIGTERM && errno == ESRCH)
-            {
-                report(report_info,
-                       "Can't send signal SIGTERM to application [%i] "
-                       "because application is already terminated. \n",
-                       g_invoked_pid);
-            }
-            else
-            {
-                report(report_error,
-                      "Can't send signal %i to application [%i]: %s \n",
-                      sig, g_invoked_pid, strerror(errno));
-            }
-        }
-
-        // Restore signal handlers
-        sigs_restore();
-
-        // Write signal number to the self-pipe
-        char signal_id = (char) sig;
-        if (write(g_signal_pipe[1], &signal_id, 1) != 1)
-            _exit(EXIT_FAILURE);
-
-        // Send the signal to itself using the default handler
-        raise(sig);
-#ifdef WITH_COVERAGE
-        __gcov_flush();
+#if VERBOSE_SIGNALS
+    static const char m[] = "*** signal\n";
+    if (write(STDERR_FILENO, m, sizeof m - 1) == -1) {
+        // dontcare
+    }
 #endif
+
+    // Write signal number to the self-pipe
+    char signal_id = (char) sig;
+    if (g_signal_pipe[1] == -1 || write(g_signal_pipe[1], &signal_id, 1) != 1) {
+        const char m[] = "*** signal pipe write failure, terminating\n";
+        if (write(STDERR_FILENO, m, sizeof m - 1) == -1) {
+            // dontcare
+        }
+        _exit(EXIT_FAILURE);
     }
 }
 
 // Sets signal actions for Unix signals
 static void sigs_set(struct sigaction *sig)
 {
-    sigaction(SIGABRT,   sig, NULL);
-    sigaction(SIGALRM,   sig, NULL);
-    sigaction(SIGBUS,    sig, NULL);
-    sigaction(SIGCHLD,   sig, NULL);
-    sigaction(SIGCONT,   sig, NULL);
-    sigaction(SIGHUP,    sig, NULL);
     sigaction(SIGINT,    sig, NULL);
-    sigaction(SIGIO,     sig, NULL);
-    sigaction(SIGIOT,    sig, NULL);
-    sigaction(SIGPIPE,   sig, NULL);
-    sigaction(SIGPROF,   sig, NULL);
-    sigaction(SIGPWR,    sig, NULL);
-    sigaction(SIGQUIT,   sig, NULL);
-    sigaction(SIGSEGV,   sig, NULL);
-    sigaction(SIGSYS,    sig, NULL);
     sigaction(SIGTERM,   sig, NULL);
-    sigaction(SIGTRAP,   sig, NULL);
-    sigaction(SIGTSTP,   sig, NULL);
-    sigaction(SIGTTIN,   sig, NULL);
-    sigaction(SIGTTOU,   sig, NULL);
-    sigaction(SIGUSR1,   sig, NULL);
-    sigaction(SIGUSR2,   sig, NULL);
-    sigaction(SIGVTALRM, sig, NULL);
-    sigaction(SIGWINCH,  sig, NULL);
-    sigaction(SIGXCPU,   sig, NULL);
-    sigaction(SIGXFSZ,   sig, NULL);
 }
 
 // Sets up the signal forwarder
@@ -228,6 +195,131 @@ static void sigs_restore(void)
     sig.sa_handler = SIG_DFL;
 
     sigs_set(&sig);
+}
+
+static unsigned timestamp(void)
+{
+    struct timespec ts = { 0, 0 };
+    if (clock_gettime(CLOCK_BOOTTIME, &ts) == -1 &&
+        clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
+        error("can't obtain a monotonic timestamp\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* NOTE: caller must assume overflow to happen i.e.
+     * the return values themselves mean nothing, only
+     * differences between return values should be used.
+     */
+    return ((unsigned)(ts.tv_sec * 1000u) +
+            (unsigned)(ts.tv_nsec / (1000 * 1000u)));
+}
+
+static bool shutdown_socket(int socket_fd)
+{
+    bool disconnected = false;
+
+    /* Close transmit end from our side, then wait
+     * for peer to receive EOF and close the receive
+     * end too.
+     */
+
+    debug("trying to disconnect booster socket...\n");
+
+    if (shutdown(socket_fd, SHUT_WR) == -1) {
+        warning("socket shutdown failed: %m\n");
+        goto EXIT;
+    }
+
+    unsigned started = timestamp();
+    unsigned timeout = 5000;
+    for (;;) {
+        unsigned elapsed = timestamp() - started;
+        if (elapsed >= timeout)
+            break;
+
+        struct pollfd pfd = {
+            .fd = socket_fd,
+            .events = POLLIN,
+            .revents = 0,
+        };
+
+        debug("waiting for booster socket input...\n");
+        int rc = poll(&pfd, 1, (int)(timeout - elapsed));
+
+        if (rc == 0)
+            break;
+
+        if (rc == -1) {
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            warning("socket poll failed: %m\n");
+            goto EXIT;
+        }
+
+        char buf[256];
+        rc = recv(socket_fd, buf, sizeof buf, MSG_DONTWAIT);
+        if (rc == 0) {
+            /* EOF -> peer closed the socket */
+            disconnected = true;
+            goto EXIT;
+        }
+
+        if (rc == -1) {
+            warning("socket read failed: %m\n");
+            goto EXIT;
+        }
+    }
+    warning("socket poll timeout\n");
+
+EXIT:
+    if (disconnected)
+        debug("booster socket was succesfully disconnected\n");
+    else
+        warning("could not disconnect booster socket\n");
+
+    return disconnected;
+}
+
+static void kill_application(pid_t pid)
+{
+    if (pid == -1) {
+        warning("application pid is not known, can't kill it");
+        goto EXIT;
+    }
+
+    warning("sending SIGTERM to application (pid=%d)", (int)pid);
+
+    if (kill(pid, SIGTERM) == -1)
+        goto FAIL;
+
+    for (int i = 0; i < 10; ++i) {
+        sleep(1);
+        if (kill(pid, 0) == -1)
+            goto FAIL;
+    }
+
+    warning("sending SIGKILL to application (pid=%d)", (int)pid);
+
+    if (kill(pid, SIGKILL) == -1)
+        goto FAIL;
+
+    for (int i = 0; i < 10; ++i) {
+        sleep(1);
+        if (kill(pid, 0) == -1)
+            goto FAIL;
+    }
+
+    warning("application (pid=%d) did not exit", (int)pid);
+    goto EXIT;
+
+FAIL:
+    if (errno == ESRCH)
+        debug("application (pid=%d) has exited", (int)pid);
+    else
+        warning("application (pid=%d) kill failed: %m", (int)pid);
+
+EXIT:
+    return;
 }
 
 // Receive ACK
@@ -554,96 +646,88 @@ static void notify_app_lauch(const char *desktop_file)
     }
 }
 
-static int wait_for_launched_process_to_exit(int socket_fd, bool wait_term)
+static int wait_for_launched_process_to_exit(int socket_fd)
 {
-    int status = 0;
+    int exit_status = EXIT_FAILURE;
+    int exit_signal = 0;
 
-    // Wait for launched process to exit
-    if (wait_term)
-    {
-        // coverity[tainted_string_return_content]
-        g_invoked_pid = invoker_recv_pid(socket_fd);
-        debug("Booster's pid is %d \n ", g_invoked_pid);
+    // coverity[tainted_string_return_content]
+    g_invoked_pid = invoker_recv_pid(socket_fd);
+    debug("Booster's pid is %d \n ", g_invoked_pid);
 
-        // Forward UNIX signals to the invoked process
-        sigs_init();
+    // Setup signal handlers
+    sigs_init();
 
-        while(1)
-        {
-            // Setup things for select()
-            fd_set readfds;
-            int ndfs = 0;
+    for (;;) {
+        // Setup things for select()
+        fd_set readfds;
+        int ndfs = 0;
 
-            FD_ZERO(&readfds);
+        FD_ZERO(&readfds);
 
-            FD_SET(socket_fd, &readfds);
-            ndfs = (socket_fd > ndfs) ? socket_fd : ndfs;
+        FD_SET(socket_fd, &readfds);
+        ndfs = (socket_fd > ndfs) ? socket_fd : ndfs;
 
-            // sig_forwarder() handles signals.
-            // We only have to receive those here.
-            FD_SET(g_signal_pipe[0], &readfds);
-            ndfs = (g_signal_pipe[0] > ndfs) ? g_signal_pipe[0] : ndfs;
+        // sig_forwarder() handles signals.
+        // We only have to receive those here.
+        FD_SET(g_signal_pipe[0], &readfds);
+        ndfs = (g_signal_pipe[0] > ndfs) ? g_signal_pipe[0] : ndfs;
 
-            // Wait for something appearing in the pipes.
-            if (select(ndfs + 1, &readfds, NULL, NULL, NULL) > 0)
-            {
-                // Check if an exit status from the invoked application
-                if (FD_ISSET(socket_fd, &readfds))
-                {
-                    bool res = invoker_recv_exit(socket_fd, &status);
-
-                    if (!res)
-                    {
-                        // Because we are here, applauncherd.bin must be dead.
-                        // Now we check if the invoked process is also dead
-                        // and if not, we will kill it.
-                        char filename[50];
-                        snprintf(filename, sizeof(filename), "/proc/%d/cmdline", g_invoked_pid);
-
-                        // Open filename for reading only
-                        int fd = open(filename, O_RDONLY);
-                        if (fd != -1)
-                        {
-                            // Application is still running
-                            close(fd);
-
-                            // Send a signal to kill the application too and exit.
-                            // Sleep for some time to give
-                            // the new applauncherd some time to load its boosters and
-                            // the restart of g_invoked_pid succeeds.
-
-                            sleep(10);
-                            kill(g_invoked_pid, SIGKILL);
-                            raise(SIGKILL);
-                        }
-                        else
-                        {
-                            // connection to application was lost
-                            status = EXIT_FAILURE; 
-                        }
-                    }
-                    break;
-                }
-                // Check if we got a UNIX signal.
-                else if (FD_ISSET(g_signal_pipe[0], &readfds))
-                {
-                    // Clean up the pipe
-                    char signal_id;
-                    if (read(g_signal_pipe[0], &signal_id, 1) != 1)
-                        exit(EXIT_FAILURE);
-
-                    // Set signals forwarding to the invoked process again
-                    // (they were reset by the signal forwarder).
-                    sigs_init();
-                }
-            }
+        // Wait for something appearing in the pipes.
+        if (select(ndfs + 1, &readfds, NULL, NULL, NULL) == -1) {
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            warning("socket select failed: %m\n");
+            break;
         }
 
-        // Restore default signal handlers
-        sigs_restore();
+        // Check if we got exit status from the invoked application
+        if (FD_ISSET(socket_fd, &readfds)) {
+            if (!invoker_recv_exit(socket_fd, &exit_status)) {
+                // connection to application was lost
+                exit_status = EXIT_FAILURE;
+            } else {
+                // there is no need to kill the application
+                g_invoked_pid = -1;
+            }
+            break;
+        }
+
+        // Check if we got a UNIX signal.
+        if (FD_ISSET(g_signal_pipe[0], &readfds)) {
+            // Clean up the pipe
+            char signal_id = 0;
+            if (read(g_signal_pipe[0], &signal_id, 1) != 1) {
+                error("signal pipe read failure, terminating\n");
+                exit(EXIT_FAILURE);
+            }
+            exit_signal = signal_id;
+            if (exit_signal == SIGTERM)
+                exit_status = EXIT_SUCCESS;
+            break;
+        }
     }
 
-    return status;
+    // Restore default signal handlers
+    sigs_restore();
+
+    if (exit_status != EXIT_SUCCESS)
+        warning("application (pid=%d) exit(%d) signal(%d)\n",
+                (int)g_invoked_pid, exit_status, exit_signal);
+    else
+        debug("application (pid=%d) exit(%d) signal(%d)\n",
+              (int)g_invoked_pid, exit_status, exit_signal);
+
+    if (socket_fd != -1) {
+        if (shutdown_socket(socket_fd))
+            g_invoked_pid = -1;
+        close(socket_fd),
+            socket_fd = -1;
+        if (g_invoked_pid != -1)
+            kill_application(g_invoked_pid);
+    }
+
+    return exit_status;
 }
 
 typedef struct InvokeArgs {
@@ -677,6 +761,8 @@ typedef struct InvokeArgs {
 // "normal" invoke through a socket connection
 static int invoke_remote(int socket_fd, const InvokeArgs *args)
 {
+    int exit_status = EXIT_FAILURE;
+
     // Get process priority
     errno = 0;
     int prog_prio = getpriority(PRIO_PROCESS, 0);
@@ -701,7 +787,14 @@ static int invoke_remote(int socket_fd, const InvokeArgs *args)
     if (args->desktop_file)
         notify_app_lauch(args->desktop_file);
 
-    int exit_status = wait_for_launched_process_to_exit(socket_fd, args->wait_term);
+    if (args->wait_term) {
+        exit_status = wait_for_launched_process_to_exit(socket_fd),
+            socket_fd = -1;
+    }
+
+    if (socket_fd != -1)
+        close(socket_fd);
+
     return exit_status;
 }
 
@@ -783,8 +876,8 @@ static int invoke(InvokeArgs *args)
 
     if (fd != -1) {
         /* "normal" invoke through a socket connetion */
-        status = invoke_remote(fd, args);
-        close(fd);
+        status = invoke_remote(fd, args),
+            fd = -1;
     } else if (tried_session) {
         warning("Launch failed, session booster is not available.\n");
     } else if (strcmp(args->app_name, "default")) {
@@ -972,9 +1065,9 @@ int main(int argc, char *argv[])
     }
 
     if (pipe(g_signal_pipe) == -1)
-    { 
-        report(report_error, "Creating a pipe for Unix signals failed!\n"); 
-        exit(EXIT_FAILURE); 
+    {
+        report(report_error, "Creating a pipe for Unix signals failed!\n");
+        exit(EXIT_FAILURE);
     }
 
     // Send commands to the launcher daemon
@@ -988,5 +1081,6 @@ int main(int argc, char *argv[])
         sleep(args.exit_delay);
     }
 
+    debug("invoker exit(%d)\n", ret_val);
     return ret_val;
 }
