@@ -29,6 +29,7 @@
 #endif
 
 enum report_output {
+  report_guess,
   report_console,
   report_syslog,
   report_none

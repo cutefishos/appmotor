@@ -45,8 +45,16 @@
 #include <stdlib.h>
 #include <systemd/sd-daemon.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include "coverage.h"
+
+/* Setting VERBOSE_SIGNALS to non-zero value logs receiving of
+ * async-signals - which is useful only when actively debugging
+ * booster / invoker interoperation.
+ */
+#define VERBOSE_SIGNALS 0
+
 
 // Environment
 extern char ** environ;
@@ -63,8 +71,45 @@ static void write_dontcare(int fd, const void *data, size_t size)
         Logger::logWarning("write to fd=%d failed", fd);
 }
 
+#if VERBOSE_SIGNALS
+static char *addstr(char *pos, char *end, const char *str)
+{
+    while (pos < end && *str)
+        *pos++ = *str++;
+    return pos;
+}
+static char *addnum(char *pos, char *end, int num)
+{
+    char stk[64];
+    int sp = sizeof stk;
+    bool neg = (num < 0);
+    unsigned mag = (unsigned)(neg ? -num : num);
+    stk[--sp] = 0;
+    do {
+        stk[--sp] = '0' + mag % 10;
+    } while (mag /= 10);
+    if (neg)
+        stk[--sp] = '-';
+    return addstr(pos, end, &stk[sp]);
+}
+#endif
+
 static void write_to_signal_pipe(int sig)
 {
+#if VERBOSE_SIGNALS
+    char m[256];
+    char *p = m;
+    char *e = m + sizeof m - 1;
+    p = addstr(p, e, "*** signal=");
+    p = addnum(p, e, sig);
+    p = addstr(p, e, " pid=");
+    p = addnum(p, e, getpid());
+    p = addstr(p, e, "\n");
+    if (write(STDERR_FILENO, m, p - m) < 0) {
+        // dontcare
+    }
+#endif
+
     char v = (char)sig;
     if (write(Daemon::instance()->sigPipeFd(), &v, 1) != 1) {
         /* If we can't write to internal signal forwarding
@@ -89,6 +134,164 @@ static int read_from_signal_pipe(int fd)
     return sig;
 }
 
+static unsigned timestamp(void)
+{
+    struct timespec ts = { 0, 0 };
+    if (clock_gettime(CLOCK_BOOTTIME, &ts) == -1 &&
+        clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
+        error("can't obtain a monotonic timestamp\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* NOTE: caller must assume overflow to happen i.e.
+     * the return values themselves mean nothing, only
+     * differences between return values should be used.
+     */
+    return ((unsigned)(ts.tv_sec * 1000u) +
+            (unsigned)(ts.tv_nsec / (1000 * 1000u)));
+}
+
+static bool shutdown_socket(int socket_fd)
+{
+    bool disconnected = false;
+
+    /* Close transmit end from our side, then wait
+     * for peer to receive EOF and close the receive
+     * end too.
+     */
+
+    debug("trying to disconnect booster socket...\n");
+
+    unsigned started = timestamp();
+    unsigned timeout = 5000;
+
+    if (shutdown(socket_fd, SHUT_WR) == -1) {
+        warning("socket shutdown failed: %m\n");
+        goto EXIT;
+    }
+
+    for (;;) {
+        unsigned elapsed = timestamp() - started;
+        if (elapsed >= timeout)
+            break;
+
+        struct pollfd pfd = {
+            .fd = socket_fd,
+            .events = POLLIN,
+            .revents = 0,
+        };
+
+        debug("waiting for booster socket input...\n");
+        int rc = poll(&pfd, 1, (int)(timeout - elapsed));
+
+        if (rc == 0)
+            break;
+
+        if (rc == -1) {
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            warning("socket poll failed: %m\n");
+            goto EXIT;
+        }
+
+        char buf[256];
+        rc = recv(socket_fd, buf, sizeof buf, MSG_DONTWAIT);
+        if (rc == 0) {
+            /* EOF -> peer closed the socket */
+            disconnected = true;
+            goto EXIT;
+        }
+
+        if (rc == -1) {
+            warning("socket read failed: %m\n");
+            goto EXIT;
+        }
+    }
+    warning("socket poll timeout\n");
+
+EXIT:
+    if (disconnected)
+        debug("booster socket was succesfully disconnected\n");
+    else
+        warning("could not disconnect booster socket\n");
+
+    return disconnected;
+}
+
+static void kill_process(const char *label, pid_t pid)
+{
+    if (pid == -1) {
+        warning("%s pid is not known, can't kill it", label);
+        goto EXIT;
+    }
+
+    warning("sending SIGTERM to %s (pid=%d)", label, (int)pid);
+
+    if (kill(pid, SIGTERM) == -1)
+        goto FAIL;
+
+    for (int i = 0; i < 10; ++i) {
+        sleep(1);
+        /* We use this function for both boosters and invokers.
+         * Boosters are child processes and we must use wait*()
+         * to reap them. But invokers are not descendants of
+         * booster daemon, so ECHILD failures are expected too.
+         */
+        int status = 0;
+        if (waitpid(pid, &status, WNOHANG) == -1 && errno != ECHILD)
+            warning("%s pid=%d) waitpid error: %m", label, (int)pid);
+        if (kill(pid, 0) == -1)
+            goto FAIL;
+    }
+
+    warning("sending SIGKILL to %s (pid=%d)", label, (int)pid);
+
+    if (kill(pid, SIGKILL) == -1)
+        goto FAIL;
+
+    for (int i = 0; i < 10; ++i) {
+        sleep(1);
+        int status = 0;
+        if (waitpid(pid, &status, WNOHANG) == -1 && errno != ECHILD)
+            warning("%s pid=%d) waitpid error: %m", label, (int)pid);
+        if (kill(pid, 0) == -1)
+            goto FAIL;
+    }
+
+    warning("%s (pid=%d) did not exit", label, (int)pid);
+    goto EXIT;
+
+FAIL:
+    if (errno == ESRCH)
+        debug("%s (pid=%d) has exited", label, (int)pid);
+    else
+        warning("%s (pid=%d) kill failed: %m", label, (int)pid);
+
+EXIT:
+    return;
+}
+
+static void close_invoker(pid_t invoker_pid, int socket_fd, int exit_status)
+{
+    if (socket_fd != -1) {
+        Logger::logWarning("Daemon: sending exit(%d) to invoker(%d)\n",
+                           exit_status, (int)invoker_pid);
+        uint32_t msg = INVOKER_MSG_EXIT;
+        uint32_t dta = exit_status;
+        write_dontcare(socket_fd, &msg, sizeof msg);
+        write_dontcare(socket_fd, &dta, sizeof dta);
+
+        if (shutdown_socket(socket_fd))
+            invoker_pid = -1;
+
+        close(socket_fd),
+            socket_fd = -1;
+    }
+
+    if (invoker_pid != -1)
+        kill_process("invoker", invoker_pid);
+}
+
 Daemon::Daemon(int & argc, char * argv[]) :
     m_daemon(false),
     m_debugMode(false),
@@ -106,6 +309,7 @@ Daemon::Daemon(int & argc, char * argv[]) :
     // Install signal handlers. The original handlers are saved
     // in the daemon instance so that they can be restored in boosters.
     setUnixSignalHandler(SIGCHLD, write_to_signal_pipe); // reap zombies
+    setUnixSignalHandler(SIGINT,  write_to_signal_pipe); // exit launcher
     setUnixSignalHandler(SIGTERM, write_to_signal_pipe); // exit launcher
     setUnixSignalHandler(SIGUSR1, write_to_signal_pipe); // enter normal mode from boot mode
     setUnixSignalHandler(SIGUSR2, write_to_signal_pipe); // enter boot mode (same as --boot-mode)
@@ -194,6 +398,15 @@ void Daemon::run(Booster *booster)
         FD_SET(m_sigPipeFd[0], &rfds);
         ndfs = std::max(ndfs, m_sigPipeFd[0]);
 
+        /* Listen to invoker EOFs */
+        for (auto iter = m_boosterPidToInvokerFd.begin(); iter != m_boosterPidToInvokerFd.end(); ++iter) {
+            int fd = iter->second;
+            if (fd != -1) {
+                FD_SET(fd, &rfds);
+                ndfs = std::max(ndfs, fd);
+            }
+        }
+
         // Wait for something appearing in the pipes.
         if (select(ndfs + 1, &rfds, NULL, NULL, NULL) > 0)
         {
@@ -219,9 +432,11 @@ void Daemon::run(Booster *booster)
                     reapZombies();
                     break;
 
+                case SIGINT:
                 case SIGTERM: {
-                    Logger::logDebug("Daemon: SIGTERM received.");
+                    Logger::logDebug("Daemon: SIGINT / SIGTERM received.");
 
+                    // FIXME: Legacy pid file path -> see daemonize()
                     const std::string pidFilePath = m_socketManager->socketRootPath() + m_booster->boosterType() + ".pid";
                     FILE * const pidFile = fopen(pidFilePath.c_str(), "r");
                     if (pidFile)
@@ -234,6 +449,43 @@ void Daemon::run(Booster *booster)
                         fclose(pidFile);
                     }
 
+                    for (;;) {
+                        PidVect::iterator iter(m_children.begin());
+                        if (iter == m_children.end())
+                            break;
+                        pid_t booster_pid = *iter;
+                        m_children.erase(iter);
+
+                        /* Get and remove booster socket  fd */
+                        int socket_fd = -1;
+                        FdMap::iterator fdIter = m_boosterPidToInvokerFd.find(booster_pid);
+                        if (fdIter != m_boosterPidToInvokerFd.end()) {
+                            socket_fd = (*fdIter).second;
+                            m_boosterPidToInvokerFd.erase(fdIter);
+                        }
+                        /* Get and remove invoker pid */
+                        pid_t invoker_pid = -1;
+                        PidMap::iterator pidIter = m_boosterPidToInvokerPid.find(booster_pid);
+                        if (pidIter != m_boosterPidToInvokerPid.end()) {
+                            invoker_pid = (*pidIter).second;
+                            m_boosterPidToInvokerPid.erase(pidIter);
+                        }
+
+                        /* Normally boosters are stopped on shutdown / user switch,
+                         * and even then it should happen after applications have
+                         * already been stopped.
+                         */
+                        warning("terminating: booster:%d invoker:%d socket:%d",
+                                (int)booster_pid, (int)invoker_pid, socket_fd);
+
+                        /* Terminate invoker */
+                        close_invoker(invoker_pid, socket_fd, EXIT_FAILURE);
+
+                        /* Terminate booster */
+                        kill_process("booster", booster_pid);
+                    }
+
+                    Logger::logDebug("booster exit");
                     exit(EXIT_SUCCESS);
                     break;
                 }
@@ -254,6 +506,41 @@ void Daemon::run(Booster *booster)
 
                 default:
                     break;
+                }
+                continue;
+            }
+
+            /* Handle closed booster sockets */
+            for (auto iter = m_boosterPidToInvokerFd.begin(); iter != m_boosterPidToInvokerFd.end();) {
+                int socket_fd = iter->second;
+                if (socket_fd != -1 && FD_ISSET(socket_fd, &rfds)) {
+                    /* Note: bookkeeping must be updated first to avoid
+                     *       any ringing due to socket closes / child
+                     *       process exits.
+                     */
+                    pid_t booster_pid = iter->first;
+                    iter = m_boosterPidToInvokerFd.erase(iter);
+
+                    pid_t invoker_pid = -1;
+                    PidMap::iterator pidIter = m_boosterPidToInvokerPid.find(booster_pid);
+                    if (pidIter != m_boosterPidToInvokerPid.end()) {
+                        invoker_pid = pidIter->second;
+                        m_boosterPidToInvokerPid.erase(pidIter);
+                    }
+
+                    /* Note that it is slightly unexpected if we get here
+                     * as it means invoker exited rather than application.
+                     */
+                    warning("terminating: booster:%d invoker:%d socket:%d",
+                            (int)booster_pid, (int)invoker_pid, socket_fd);
+
+                    /* Terminate invoker */
+                    close_invoker(invoker_pid, socket_fd, EXIT_FAILURE);
+
+                    /* Terminate booster */
+                    kill_process("booster", booster_pid);
+                } else {
+                    ++iter;
                 }
             }
         }
@@ -283,21 +570,36 @@ void Daemon::readFromBoosterSocket(int fd)
 
     if (recvmsg(fd, &msg, 0) >= 0)
     {
+        Logger::logDebug("Daemon: boosters's pid: %d\n", m_boosterPid);
         Logger::logDebug("Daemon: invoker's pid: %d\n", invokerPid);
         Logger::logDebug("Daemon: respawn delay: %d \n", delay);
-        if (invokerPid != 0)
-        {
-            // Store booster - invoker pid pair
-            // Store booster - invoker socket pair
-            if (m_boosterPid)
-            {
-                cmsg = CMSG_FIRSTHDR(&msg);
-                int newFd;                 
-                memcpy(&newFd, CMSG_DATA(cmsg), sizeof(int));
-                Logger::logDebug("Daemon: socket file descriptor: %d\n", newFd);
-                m_boosterPidToInvokerPid[m_boosterPid] = invokerPid;
+
+        int newFd = -1;
+
+        if (invokerPid > 0) {
+            /* invokerPid got filled in at recvmsg() => we have fd too */
+            cmsg = CMSG_FIRSTHDR(&msg);
+            memcpy(&newFd, CMSG_DATA(cmsg), sizeof(int));
+            Logger::logDebug("Daemon: socket file descriptor: %d\n", newFd);
+        }
+
+        if (m_boosterPid > 0) {
+            /* We were expecting booster details => update bookkeeping */
+            if (newFd != -1) {
+                // Store booster pid - invoker socket pair
                 m_boosterPidToInvokerFd[m_boosterPid] = newFd;
+                newFd = -1;
             }
+            if (invokerPid > 0) {
+                // Store booster pid - invoker pid pair
+                m_boosterPidToInvokerPid[m_boosterPid] = invokerPid;
+            }
+        }
+
+        if (newFd != -1) {
+            /* If we are not going to use the received fd, it needs to be closed */
+            Logger::logWarning("Daemon: close stray socket file descriptor: %d\n", newFd);
+            close(newFd);
         }
     }
     else
@@ -318,7 +620,7 @@ void Daemon::killProcess(pid_t pid, int signal) const
 {
     if (pid > 0)
     {
-        Logger::logDebug("Daemon: Killing pid %d with %d", pid, signal);
+        Logger::logWarning("Daemon: Killing pid %d with %d", pid, signal);
         if (kill(pid, signal) != 0)
         {
             Logger::logError("Daemon: Failed to kill %d: %s\n",
@@ -413,8 +715,10 @@ void Daemon::forkBooster(int sleepTime)
         // Guarantee some time for the just launched application to
         // start up before initializing new booster if needed.
         // Not done if in the boot mode.
-        if (!m_bootMode && sleepTime)
+        if (!m_bootMode && sleepTime) {
+            Logger::logDebug("allow time for application startup - sleep(%ds)...\n", sleepTime);
             sleep(sleepTime);
+        }
 
         Logger::logDebug("Daemon: Running a new Booster of type '%s'", m_booster->boosterType().c_str());
 
@@ -425,7 +729,6 @@ void Daemon::forkBooster(int sleepTime)
                                   m_singleInstance, m_bootMode);
         } catch (const std::runtime_error &e) {
             Logger::logError("Booster: Failed to initialize: %s\n", e.what());
-            fprintf(stderr, "Failed to initialize: %s\n", e.what());
             delete m_booster;
             _exit(EXIT_FAILURE);
         }
@@ -463,59 +766,49 @@ void Daemon::reapZombies()
     while (i != m_children.end())
     {
         // Check if the pid had exited and become a zombie
-        int status;
+        int status = 0;
         pid_t pid = waitpid(*i, &status, WNOHANG);
-        if (pid)
+        if (pid > 0)
         {
             // The pid had exited. Remove it from the pid vector.
             i = m_children.erase(i);
 
-            // Find out if the exited process has a mapping with an invoker process.
-            // If this is the case, then kill the invoker process with the same signal
-            // that killed the exited process.
-            PidMap::iterator it = m_boosterPidToInvokerPid.find(pid);
-            if (it != m_boosterPidToInvokerPid.end())
-            {
-                Logger::logDebug("Daemon: Terminated process had a mapping to an invoker pid");
+            // Find out what happened
+            int exit_status = EXIT_FAILURE;
+            int signal_no = 0;
 
-                if (WIFEXITED(status))
-                {
-                    Logger::logInfo("Boosted process (pid=%d) exited with status %d\n", pid, WEXITSTATUS(status));
-                    Logger::logDebug("Daemon: child exited by exit(x), _exit(x) or return x\n");
-                    Logger::logDebug("Daemon: x == %d\n", WEXITSTATUS(status));
-                    FdMap::iterator fd = m_boosterPidToInvokerFd.find(pid);
-                    if (fd != m_boosterPidToInvokerFd.end())
-                    {
-                        uint32_t command = INVOKER_MSG_EXIT;
-                        uint32_t argument = WEXITSTATUS(status);
-                        write_dontcare((*fd).second, &command, sizeof command);
-                        write_dontcare((*fd).second, &argument, sizeof argument);
-                        close((*fd).second);
-                        m_boosterPidToInvokerFd.erase(fd);
-                    }
-                }
-                else if (WIFSIGNALED(status))
-                {
-                    int signal = WTERMSIG(status);
-                    pid_t invokerPid = (*it).second;
-
-                    Logger::logInfo("Boosted process (pid=%d) was terminated due to signal %d\n", pid, signal);
-                    Logger::logDebug("Daemon: Booster (pid=%d) was terminated due to signal %d\n", pid, signal);
-                    Logger::logDebug("Daemon: Killing invoker process (pid=%d) by signal %d..\n", invokerPid, signal);
-
-                    FdMap::iterator fd = m_boosterPidToInvokerFd.find(pid);
-                    if (fd != m_boosterPidToInvokerFd.end())
-                    {
-                        close((*fd).second);
-                        m_boosterPidToInvokerFd.erase(fd);
-                    }
-
-                    killProcess(invokerPid, signal);
-                }
-
-                // Remove a dead booster
-                m_boosterPidToInvokerPid.erase(it);
+            if (WIFSIGNALED(status)) {
+                signal_no = WTERMSIG(status);
+                Logger::logWarning("boosted process (pid=%d) signal(%s)\n",
+                                   pid, strsignal(signal_no));
+            } else if (WIFEXITED(status)) {
+                exit_status = WEXITSTATUS(status);
+                if (exit_status != EXIT_SUCCESS)
+                    Logger::logWarning("Boosted process (pid=%d) exit(%d)\n",
+                                       pid, exit_status);
+                else
+                    Logger::logDebug("Boosted process (pid=%d) exit(%d)\n",
+                                     pid, exit_status);
             }
+
+            /* Get and remove booster socket fd */
+            int socket_fd = -1;
+            FdMap::iterator fdIter = m_boosterPidToInvokerFd.find(pid);
+            if (fdIter != m_boosterPidToInvokerFd.end()) {
+                socket_fd = (*fdIter).second;
+                m_boosterPidToInvokerFd.erase(fdIter);
+            }
+
+            /* Get and remove invoker pid */
+            pid_t invoker_pid = -1;
+            PidMap::iterator pidIter = m_boosterPidToInvokerPid.find(pid);
+            if (pidIter != m_boosterPidToInvokerPid.end()) {
+                invoker_pid = (*pidIter).second;
+                m_boosterPidToInvokerPid.erase(pidIter);
+            }
+
+            /* Terminate invoker associated with the booster */
+            close_invoker(invoker_pid, socket_fd, exit_status);
 
             // Check if pid belongs to a booster and restart the dead booster if needed
             if (pid == m_boosterPid)
@@ -527,6 +820,15 @@ void Daemon::reapZombies()
         {
             i++;
         }
+    }
+
+    /* Handle stray child exits */
+    for (;;) {
+        int status = 0;
+        pid_t pid = waitpid(-1, &status, WNOHANG);
+        if (pid <= 0)
+            break;
+        Logger::logWarning("unexpected child exit pid=%d status=0x%x\n", pid, status);
     }
 }
 
@@ -557,7 +859,18 @@ void Daemon::daemonize()
     // If we got a good PID, then we can exit the parent process.
     if (pid > 0)
     {
+        /* FIXME: Existing booster systemd unit files etc are expecting
+         *        pid file paths derived from booster type. As long as
+         *        there are no application specific boosters using
+         *        pid files we can continue using old style paths.
+         */
+#if 0
+        // Path that takes also application name into account
+        const std::string pidFilePath = m_socketManager->socketRootPath() + m_booster->socketId() + ".pid";
+#else
+        // Legacy path
         const std::string pidFilePath = m_socketManager->socketRootPath() + m_booster->boosterType() + ".pid";
+#endif
         FILE * const pidFile = fopen(pidFilePath.c_str(), "w");
         if (pidFile)
         {
@@ -717,7 +1030,7 @@ void Daemon::enterBootMode()
 
 void Daemon::killBoosters()
 {
-    if (m_boosterPid)
+    if (m_boosterPid > 0)
         killProcess(m_boosterPid, SIGTERM);
 
     // NOTE!!: m_boosterPid must not be cleared
@@ -726,33 +1039,29 @@ void Daemon::killBoosters()
 
 void Daemon::setUnixSignalHandler(int signum, sighandler_t handler)
 {
-    sighandler_t old_handler = signal(signum, handler);
+    // needs to be undone in instance
+    m_originalSigHandlers[signum] = SIG_DFL;
 
-    if (signum == SIGHUP && old_handler == SIG_IGN)
-    {
-        // SIGHUP is a special case. It is set to SIG_IGN
-        // when applauncherd does a re-exec, but we still want the
-        // boosters / launched applications to get the default
-        // handler.
-        m_originalSigHandlers[signum] = SIG_DFL;
-    }
-    else if (old_handler != SIG_ERR)
-    {
-        m_originalSigHandlers[signum] = old_handler;
-    } 
-    else 
-    {
-        throw std::runtime_error("Daemon: Failed to set signal handler");
-    }
+    struct sigaction sig;
+    memset(&sig, 0, sizeof(sig));
+    sig.sa_flags = SA_RESTART;
+    sig.sa_handler = handler;
+    if (sigaction(signum, &sig, NULL) == -1)
+        warning("trap(%s): %m", strsignal(signum));
+    else
+        debug("trap(%s): ok", strsignal(signum));
 }
 
 void Daemon::restoreUnixSignalHandlers()
 {
     for (SigHandlerMap::iterator it = m_originalSigHandlers.begin(); it != m_originalSigHandlers.end(); it++ )
     {
-        signal(it->first, it->second);
+        int signum = it->first;
+        if (signal(signum, SIG_DFL) == SIG_ERR)
+            warning("untrap(%s): %m", strsignal(signum));
+        else
+            debug("untrap(%s): ok", strsignal(signum));
     }
-
     m_originalSigHandlers.clear();
 }
 
@@ -764,4 +1073,3 @@ Daemon::~Daemon()
 
     Logger::closeLog();
 }
-
