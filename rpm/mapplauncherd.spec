@@ -8,13 +8,13 @@ Source0:    %{name}-%{version}.tar.bz2
 Source1:    booster-cgroup-mount.service
 Requires:   systemd-user-session-targets
 Requires(post): /sbin/ldconfig
-Requires(post): /usr/sbin/setcap
 Requires(postun): /sbin/ldconfig
 Requires(pre):  sailfish-setup
 BuildRequires:  pkgconfig(libshadowutils)
 BuildRequires:  pkgconfig(systemd)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(libcap)
+BuildRequires:  pkgconfig(glib-2.0)
 BuildRequires:  cmake
 Provides:   meegotouch-applauncherd > 3.0.3
 Obsoletes:   meegotouch-applauncherd <= 3.0.3
@@ -75,7 +75,6 @@ install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/boo
 
 %post
 /sbin/ldconfig
-/usr/sbin/setcap cap_sys_ptrace+pe %{_libexecdir}/mapplauncherd/booster-generic || :
 
 %postun -p /sbin/ldconfig
 
@@ -87,7 +86,8 @@ install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/boo
 %{_bindir}/single-instance
 %{_libdir}/libapplauncherd.so*
 %attr(2755, root, privileged) %{_libexecdir}/mapplauncherd/booster-generic
-%{_userunitdir}//booster-generic.service
+%{_userunitdir}/booster-generic.service
+%{_userunitdir}/booster-generic@.service
 %{_userunitdir}/user-session.target.wants/booster-generic.service
 
 %files devel

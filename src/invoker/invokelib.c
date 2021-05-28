@@ -53,7 +53,7 @@ bool invoke_recv_msg(int fd, uint32_t *msg)
 
     if (numRead == -1)
     {
-        debug("%s: Error reading message: %s\n", __FUNCTION__, strerror(errno));
+        debug("%s: Error reading message: %m\n", __FUNCTION__);
         *msg = 0;
         return false;
     }

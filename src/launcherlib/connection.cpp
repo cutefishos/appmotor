@@ -21,6 +21,7 @@
 
 #include "connection.h"
 #include "logger.h"
+#include "report.h"
 
 #include <sys/socket.h>
 #include <sys/un.h>       /* for getsockopt */
@@ -65,6 +66,12 @@ Connection::~Connection()
             m_io[i] = -1;
         }
     }
+
+    for (int i = 0; i < m_argc; ++i)
+        delete[] m_argv[i];
+    free(m_argv);
+    m_argc = 0;
+    m_argv = nullptr;
 }
 
 
@@ -148,7 +155,7 @@ bool Connection::recvMsg(uint32_t *msg)
     }
 }
 
-const char * Connection::recvStr()
+char *Connection::recvStr()
 {
     if (!m_testMode)
     {
@@ -238,7 +245,7 @@ string Connection::receiveAppName()
         return string();
     }
 
-    const char* name = recvStr();
+    char *name = recvStr();
     if (!name)
     {
         Logger::logError("Connection: receiving application name");
@@ -252,7 +259,7 @@ string Connection::receiveAppName()
 
 bool Connection::receiveExec()
 {
-    const char* filename = recvStr();
+    char *filename = recvStr();
     if (!filename)
         return false;
 
@@ -282,49 +289,34 @@ bool Connection::receiveIDs()
 
 bool Connection::receiveArgs()
 {
-    // Get argc
-    recvMsg(&m_argc);
     const uint32_t argMax = 1024;
-    if (m_argc > 0 && m_argc < argMax)
-    {
-        // Reserve memory for argv
-        m_argv = new const char * [m_argc];
-        if (!m_argv)
-        {
-            Logger::logError("Connection: reserving memory for argv");
-            return false;
-        }
 
-        // Get argv
-        for (uint i = 0; i < m_argc; i++)
-        {
-            m_argv[i] = recvStr();
-            if (!m_argv[i])
-            {
-                Logger::logError("Connection: receiving argv[%i]", i);
-                return false;
-            }
-        }
-    }
-    else
-    {
+    // Clear current args
+    for (int i = 0; i < m_argc; ++i)
+        delete[] m_argv[i];
+    free(m_argv);
+    m_argc = 0;
+    m_argv = nullptr;
+
+    // Get argc
+    uint32_t argc = 0;
+    recvMsg(&argc);
+    if (argc < 1 || argc > argMax) {
         Logger::logError("Connection: invalid number of parameters %d", m_argc);
         return false;
     }
 
+    m_argc = argc;
+    m_argv = (char **)calloc(m_argc + 1, sizeof *m_argv);
+    for (int i = 0; i < m_argc; ++i) {
+        if (!(m_argv[i] = recvStr())) {
+            m_argc = i;
+            Logger::logError("Connection: receiving argv[%i]", i);
+            return false;
+        }
+    }
+    m_argv[m_argc] = nullptr;
     return true;
-}
-
-// coverity[ +tainted_string_sanitize_content : arg-0 ]
-bool putenv_sanitize(const char * s)
-{
-    return static_cast<bool>(strchr(s, '='));
-}
-
-// coverity[ +free : arg-0 ]
-int putenv_wrapper(char * var)
-{
-    return putenv(var);
 }
 
 bool Connection::receiveEnv()
@@ -341,30 +333,28 @@ bool Connection::receiveEnv()
         // Get environment variables
         for (uint32_t i = 0; i < n_vars; i++)
         {
-            const char * var = recvStr();
+            char *var = recvStr();
             if (var == NULL)
             {
                 Logger::logError("Connection: receiving environ[%i]", i);
                 return false;
             }
-
-            // In case of error, just warn and try to continue, as the other side is
-            // going to keep sending the reset of the message.
-            // String pointed to by var shall become part of the environment, so altering
-            // the string shall change the environment, don't free it
-            if (putenv_sanitize(var))
-            {
-                if (putenv_wrapper(const_cast<char *>(var)) != 0)
-                {
-                    Logger::logWarning("Connection: putenv failed");
+            char *val = strchr(var, '=');
+            if (val) {
+                *val++ = 0;
+                const char *cur = getenv(var);
+                /* Note: DBUS_SESSION_BUS_ADDRESS is a special case. If we
+                 * are running in sandbox, we already have non-standard path
+                 * that firejail has placed in env.
+                 */
+                if (!cur || strcmp(var, "DBUS_SESSION_BUS_ADDRESS")) {
+                    if (!cur || strcmp(cur, val)) {
+                        info("ENV: $%s: %s -> %s", var, cur ?: "n/a", val);
+                        setenv(var, val, true);
+                    }
                 }
             }
-            else
-            {
-                delete [] var;
-                var = NULL;
-                Logger::logWarning("Connection: invalid environment data");
-            }
+            delete [] var;
         }
     }
     else
@@ -430,43 +420,49 @@ bool Connection::receiveActions()
 {
     Logger::logDebug("Connection: enter: %s", __FUNCTION__);
 
-    while (1)
+    for (;;)
     {
         uint32_t action = 0;
 
         // Get the action.
-        recvMsg(&action);
+        if (!recvMsg(&action))
+            return false;
 
         switch (action)
         {
         case INVOKER_MSG_EXEC:
-            receiveExec();
+            if (!receiveExec())
+                return false;
             break;
 
         case INVOKER_MSG_ARGS:
-            receiveArgs();
+            if (!receiveArgs())
+                return false;
             break;
 
         case INVOKER_MSG_ENV:
-            // Clean-up all the env variables
-            clearenv();
-            receiveEnv();
+            if (!receiveEnv())
+                return false;
             break;
 
         case INVOKER_MSG_PRIO:
-            receivePriority();
+            if (!receivePriority())
+                return false;
             break;
 
         case INVOKER_MSG_DELAY:
-            receiveDelay();
+            if (!receiveDelay())
+                return false;
             break;
 
         case INVOKER_MSG_IO:
-            receiveIO();
+            if (!receiveIO())
+                return false;
             break;
 
         case INVOKER_MSG_IDS:
-            receiveIDs();
+            if (!receiveIDs())
+                return false;
             break;
 
         case INVOKER_MSG_SPLASH:
@@ -478,11 +474,10 @@ bool Connection::receiveActions()
             return false;
 
         case INVOKER_MSG_END:
-            sendMsg(INVOKER_MSG_ACK);
-
-            if (m_sendPid)
-                sendPid(getpid());
-
+            if (!sendMsg(INVOKER_MSG_ACK))
+                return false;
+            if (m_sendPid && !sendPid(getpid()))
+                return false;
             return true;
 
         default:
@@ -517,7 +512,7 @@ bool Connection::receiveApplicationData(AppData* appData)
         appData->setPriority(m_priority);
         appData->setDelay(m_delay);
         appData->setArgc(m_argc);
-        appData->setArgv(m_argv);
+        appData->setArgv((const char **)m_argv);
         appData->setIODescriptors(vector<int>(m_io, m_io + IO_DESCRIPTOR_COUNT));
         appData->setIDs(m_uid, m_gid);
     }

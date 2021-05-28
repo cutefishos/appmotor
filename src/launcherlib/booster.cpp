@@ -25,6 +25,7 @@
 #include "singleinstance.h"
 #include "socketmanager.h"
 #include "logger.h"
+#include "report.h"
 
 #include <cstdlib>
 #include <dlfcn.h>
@@ -50,7 +51,11 @@
 #include <grp.h>
 #include <libgen.h>
 
+#include <dbus/dbus.h>
+
 #include "coverage.h"
+
+#include "sailjail.h"
 
 Booster::Booster() :
     m_appData(new AppData),
@@ -210,11 +215,13 @@ void Booster::sendDataToParent()
         cmsg->cmsg_type    = SCM_RIGHTS;
         cmsg->cmsg_len     = CMSG_LEN(sizeof(int));
         memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
+        debug("send to daemon: pid=%d delay=%d fd=%d", (int)pid, delay, fd);
     }
     else
     {
         msg.msg_control    = NULL;
         msg.msg_controllen = 0;
+        debug("send to daemon: pid=%d delay=%d fd=NA", (int)pid, delay);
     }
 
     if (sendmsg(boosterLauncherSocket(), &msg, 0) < 0)
@@ -275,6 +282,11 @@ int Booster::run(SocketManager * socketManager)
         try {
             if (access(m_appData->fileName().c_str(), X_OK) != 0) {
                 throw std::runtime_error("Booster: Binary doesn't have execute permissions\n");
+            }
+
+            if (boostedApplication() != "default") {
+                if (!sailjail_verify_launch(boostedApplication().c_str(), m_appData->argv()))
+                    throw std::runtime_error("Booster: Binary doesn't have launch permissions\n");
             }
 
             return launchProcess();
@@ -634,7 +646,6 @@ const string Booster::socketId() const
     return id;
 }
 
-
 pid_t Booster::invokersPid()
 {
     if (m_connection->isReportAppExitStatusNeeded())
@@ -718,3 +729,4 @@ std::string Booster::getFinalName(const std::string &name)
     }
     return name;
 }
+

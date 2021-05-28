@@ -21,4 +21,5 @@ install(TARGETS booster-generic DESTINATION ${CMAKE_INSTALL_FULL_LIBEXECDIR}/map
 
 if(INSTALL_SYSTEMD_UNITS)
 	install(FILES booster-generic.service DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user/)
+	install(FILES booster-generic@.service DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user/)
 endif()

@@ -135,7 +135,7 @@ private:
 
     uint32_t    m_options;
     int         m_argc;
-    const char ** m_argv;
+    char      **m_argv;
     string      m_appName;
     string      m_fileName;
     int         m_prio;

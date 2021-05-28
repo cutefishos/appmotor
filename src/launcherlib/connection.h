@@ -140,7 +140,7 @@ private:
     virtual bool recvMsg(uint32_t *msg);
 
     //! Receive a string. This is a virtual to help unit testing.
-    virtual const char * recvStr();
+    virtual char *recvStr();
 
     //! Run in test mode, if true
     bool m_testMode;
@@ -152,8 +152,8 @@ private:
     int m_curSocket;
 
     string   m_fileName;
-    uint32_t m_argc;
-    const char **  m_argv;
+    int      m_argc;
+    char   **m_argv;
     int      m_io[IO_DESCRIPTOR_COUNT];
     uint32_t m_priority;
     uint32_t m_delay;

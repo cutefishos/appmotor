@@ -49,11 +49,14 @@
 #include "invokelib.h"
 #include "search.h"
 
+#define BOOSTER_SESSION "silica-session"
+#define BOOSTER_GENERIC "generic"
+
 /* Setting VERBOSE_SIGNALS to non-zero value logs receiving of
  * async-signals - which is useful only when actively debugging
  * booster / invoker interoperation.
  */
-#define VERBOSE_SIGNALS 0
+#define VERBOSE_SIGNALS 01
 
 // Utility functions
 static char *strip(char *str)
@@ -223,7 +226,7 @@ static bool shutdown_socket(int socket_fd)
      * end too.
      */
 
-    debug("trying to disconnect booster socket...\n");
+    info("trying to disconnect booster socket...\n");
 
     if (shutdown(socket_fd, SHUT_WR) == -1) {
         warning("socket shutdown failed: %m\n");
@@ -243,7 +246,7 @@ static bool shutdown_socket(int socket_fd)
             .revents = 0,
         };
 
-        debug("waiting for booster socket input...\n");
+        info("waiting for booster socket input...\n");
         int rc = poll(&pfd, 1, (int)(timeout - elapsed));
 
         if (rc == 0)
@@ -273,7 +276,7 @@ static bool shutdown_socket(int socket_fd)
 
 EXIT:
     if (disconnected)
-        debug("booster socket was succesfully disconnected\n");
+        info("booster socket was succesfully disconnected\n");
     else
         warning("could not disconnect booster socket\n");
 
@@ -314,7 +317,7 @@ static void kill_application(pid_t pid)
 
 FAIL:
     if (errno == ESRCH)
-        debug("application (pid=%d) has exited", (int)pid);
+        info("application (pid=%d) has exited", (int)pid);
     else
         warning("application (pid=%d) kill failed: %m", (int)pid);
 
@@ -340,6 +343,8 @@ static bool invoke_recv_ack(int fd)
 // Inits a socket connection for the given application type
 static int invoker_init(const char *app_type, const char *app_name)
 {
+    info("try type=%s app=%s ...", app_type, app_name);
+
     bool connected = false;
     int fd = -1;
 
@@ -388,7 +393,7 @@ static int invoker_init(const char *app_type, const char *app_name)
         goto EXIT;
     }
 
-    debug("connected to: %s\n", sun.sun_path);
+    info("connected to: %s\n", sun.sun_path);
     connected = true;
 
 EXIT:
@@ -469,7 +474,7 @@ static void invoker_send_args(int fd, int argc, char **argv)
     invoke_send_msg(fd, argc);
     for (i = 0; i < argc; i++)
     {
-        debug("param %d %s \n", i, argv[i]);
+        info("param %d %s \n", i, argv[i]);
         invoke_send_str(fd, argv[i]);
     }
 }
@@ -653,7 +658,7 @@ static int wait_for_launched_process_to_exit(int socket_fd)
 
     // coverity[tainted_string_return_content]
     g_invoked_pid = invoker_recv_pid(socket_fd);
-    debug("Booster's pid is %d \n ", g_invoked_pid);
+    info("Booster's pid is %d \n ", g_invoked_pid);
 
     // Setup signal handlers
     sigs_init();
@@ -715,7 +720,7 @@ static int wait_for_launched_process_to_exit(int socket_fd)
         warning("application (pid=%d) exit(%d) signal(%d)\n",
                 (int)g_invoked_pid, exit_status, exit_signal);
     else
-        debug("application (pid=%d) exit(%d) signal(%d)\n",
+        info("application (pid=%d) exit(%d) signal(%d)\n",
               (int)g_invoked_pid, exit_status, exit_signal);
 
     if (socket_fd != -1) {
@@ -853,7 +858,7 @@ static int invoke(InvokeArgs *args)
 
     bool tried_session = false;
     for (size_t i = 0; !tried_session && types[i]; ++i) {
-        if (strcmp(types[i], "session"))
+        if (strcmp(types[i], BOOSTER_SESSION))
             continue;
         tried_session = true;
         fd = invoker_init(types[i], NULL);
@@ -866,12 +871,12 @@ static int invoke(InvokeArgs *args)
     if (fd == -1 && !tried_session) {
         bool tried_generic = false;
         for (size_t i = 0; fd == -1 && types[i]; ++i) {
-            if (!strcmp(types[i], "generic"))
+            if (!strcmp(types[i], BOOSTER_GENERIC))
                 tried_generic = true;
             fd = invoker_init(types[i], args->app_name);
         }
         if (fd == -1 && !tried_generic)
-            fd = invoker_init("generic", args->app_name);
+            fd = invoker_init(BOOSTER_GENERIC, args->app_name);
     }
 
     if (fd != -1) {
@@ -931,6 +936,7 @@ int main(int argc, char *argv[])
         {"splash",           required_argument, NULL, 'S'},
         {"splash-landscape", required_argument, NULL, 'L'},
         {"desktop-file",     required_argument, NULL, 'F'},
+        {"verbose",          no_argument,       NULL, 'v'},
         {0, 0, 0, 0}
     };
 
@@ -938,12 +944,16 @@ int main(int argc, char *argv[])
     // The use of + for POSIXLY_CORRECT behavior is a GNU extension, but avoids polluting
     // the environment
     int opt;
-    while ((opt = getopt_long(argc, argv, "+hcwnGDsoTd:t:a:r:S:L:F:", longopts, NULL)) != -1)
+    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:r:S:L:F:", longopts, NULL)) != -1)
     {
         switch(opt)
         {
         case 'h':
             usage(0);
+            break;
+
+        case 'v':
+            report_set_type(report_get_type() + 1);
             break;
 
         case 'w':
@@ -1077,10 +1087,10 @@ int main(int argc, char *argv[])
     // Sleep for delay before exiting
     if (args.exit_delay) {
         // DBUS cannot cope some times if the invoker exits too early.
-        debug("Delaying exit for %d seconds..\n", args.exit_delay);
+        info("Delaying exit for %d seconds..\n", args.exit_delay);
         sleep(args.exit_delay);
     }
 
-    debug("invoker exit(%d)\n", ret_val);
+    info("invoker exit(%d)\n", ret_val);
     return ret_val;
 }
