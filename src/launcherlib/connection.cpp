@@ -25,18 +25,12 @@
 #include <sys/socket.h>
 #include <sys/un.h>       /* for getsockopt */
 #include <sys/stat.h>     /* for chmod */
-#include <limits.h>
-#include <sstream>
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
 #include <unistd.h>
 #include <stdexcept>
 #include <sys/syslog.h>
-
-#define INVOKER_PATH "/usr/bin/invoker"
-
-std::pair<dev_t, ino_t> Connection::s_mntNS = std::pair<dev_t, ino_t>();
 
 Connection::Connection(int socketFd, bool testMode) :
         m_testMode(testMode),
@@ -79,8 +73,9 @@ int Connection::getFd() const
     return m_fd;
 }
 
-bool Connection::accept(AppData*)
+bool Connection::accept(AppData *appData)
 {
+    (void)appData; // unused
     if (!m_testMode)
     {
         m_fd = ::accept(m_curSocket, NULL, NULL);
@@ -111,47 +106,6 @@ void Connection::close()
 
         m_fd = -1;
     }
-}
-
-
-bool Connection::isPermitted()
-{
-    // Check that caller is in the same namespace and it is invoker
-    // and not something else. This is done to avoid sandboxed app
-    // that sees the socket from escaping the sandbox through booster
-    if (m_fd != -1)
-    {
-        pid_t pid = peerPid();
-        if (pid == 0)
-        {
-            Logger::logError("Connection: %s: getting peer pid failed", __FUNCTION__);
-        }
-        else
-        {
-            // There is a possibility for a race here: if caller can exit
-            // and then invoke a process with the correct binary path and
-            // pid at the right time they could fool us
-
-            if (!s_mntNS.first || getMountNamespace(pid) != s_mntNS)
-            {
-                Logger::logWarning("Connection: %s: invocation from %s (%d) came from different namespace", __FUNCTION__, getExecutablePath(pid), pid);
-            }
-            else
-            {
-                std::string executablePath = getExecutablePath(pid);
-                if (executablePath != INVOKER_PATH)
-                {
-                    Logger::logWarning("Connection: %s: executable %s (%d) is not invoker", __FUNCTION__, executablePath, pid);
-                }
-                else
-                {
-                    Logger::logDebug("Connection: %s: invoker (%d) called, allowing", __FUNCTION__, pid);
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
 }
 
 bool Connection::sendMsg(uint32_t msg)
@@ -593,38 +547,4 @@ pid_t Connection::peerPid()
     }
     return cr.pid;
 
-}
-
-void Connection::setMountNamespace(std::pair<dev_t, ino_t> mntNS)
-{
-    s_mntNS = mntNS;
-}
-
-std::pair<dev_t, ino_t> Connection::getMountNamespace(pid_t pid)
-{
-    struct stat sb;
-    std::ostringstream path;
-    path << "/proc/" << pid << "/ns/mnt";
-    if (stat(path.str().c_str(), &sb) == -1)
-    {
-        Logger::logError("Connection: %s: stat failed for pid %d: %s", __FUNCTION__, pid, strerror(errno));
-        return std::pair<dev_t, ino_t>();
-    }
-    return std::pair<dev_t, ino_t>(sb.st_dev, sb.st_ino);
-}
-
-std::string Connection::getExecutablePath(pid_t pid)
-{
-    std::ostringstream path;
-    char exe[PATH_MAX];
-    ssize_t len;
-    static_assert(sizeof(INVOKER_PATH) < sizeof(exe));
-    path << "/proc/" << pid << "/exe";
-    len = readlink(path.str().c_str(), exe, sizeof(exe));
-    if (len < 0 || (size_t)len >= sizeof(exe))
-    {
-        Logger::logError("Connection: %s: readlink failed for pid %d: %s", __FUNCTION__, pid, strerror(errno));
-        return std::string();
-    }
-    return std::string(exe, len);
 }
