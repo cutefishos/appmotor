@@ -26,4 +26,4 @@ link_libraries(${DBUS_LDFLAGS})
 add_executable(single-instance ${SRC})
 
 # Add install rule
-install(PROGRAMS single-instance DESTINATION /usr/bin/)
+install(TARGETS single-instance DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})

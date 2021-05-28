@@ -3,6 +3,11 @@ project(Applauncherd)
 cmake_minimum_required(VERSION 2.6)
 cmake_policy(VERSION 2.6)
 
+include(FeatureSummary)
+include(GNUInstallDirs)
+
+option(INSTALL_SYSTEMD_UNITS "Install systemd unit files" ON)
+
 #
 # NOTE: For verbose build use VERBOSE=1
 #
@@ -47,12 +52,15 @@ add_subdirectory(src)
 # Target for documentation (make doc)
 find_program(Doxygen NAMES doxygen)
 if (EXISTS ${Doxygen})
-    add_custom_target(doc COMMAND cd doc && ${Doxygen} doxygen-impldoc.conf COMMAND cd doc && ${Doxygen} doxygen-userdoc.conf COMMAND cd doc && ${Doxygen} doxygen-mdeclarativecache.conf)
+    add_custom_target(doc
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/doc && ${Doxygen} doxygen-impldoc.conf
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/doc && ${Doxygen} doxygen-userdoc.conf
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/doc && ${Doxygen} doxygen-mdeclarativecache.conf)
 else (EXISTS ${Doxygen})
     message(STATUS "Doxygen not found: you're not able to build documentation.")
 endif (EXISTS ${Doxygen})
 
 # Install html documentation
-install(DIRECTORY doc/implementation-documentation DESTINATION /usr/share/doc/applauncherd OPTIONAL)
-install(DIRECTORY doc/user-documentation DESTINATION /usr/share/doc/applauncherd OPTIONAL)
-install(DIRECTORY doc/mdeclarativecache-documentation DESTINATION /usr/share/doc/applauncherd OPTIONAL)
+install(DIRECTORY doc/implementation-documentation DESTINATION ${CMAKE_INSTALL_FULL_DOCDIR} OPTIONAL)
+install(DIRECTORY doc/user-documentation DESTINATION ${CMAKE_INSTALL_FULL_DOCDIR} OPTIONAL)
+install(DIRECTORY doc/mdeclarativecache-documentation DESTINATION ${CMAKE_INSTALL_FULL_DOCDIR} OPTIONAL)
