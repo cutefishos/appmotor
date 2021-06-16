@@ -28,40 +28,14 @@
 #include <ctype.h>
 
 #include "coverage.h"
+#include "report.h"
 
 bool Logger::m_isOpened  = false;
 bool Logger::m_debugMode = false;
 
-static char *strip(char *str)
-{
-    if (str) {
-        char *dst = str;
-        char *src = str;
-        while (*src && isspace(*src))
-            ++src;
-        for (;;) {
-            while (*src && !isspace(*src))
-                *dst++ = *src++;
-            while (*src && isspace(*src))
-                ++src;
-            if (!*src)
-                break;
-            *dst++ = ' ';
-        }
-        *dst = 0;
-    }
-    return str;
-}
-
 static bool useSyslog()
 {
-    static bool checked = false;
-    static bool value = false;
-    if (!checked) {
-        checked = true;
-        value = !isatty(STDIN_FILENO);
-    }
-    return value;
+    return report_get_output() == report_syslog;
 }
 
 void Logger::openLog(const char * progName)
@@ -86,63 +60,48 @@ void Logger::closeLog()
     }
 }
 
-void Logger::writeLog(const int priority, const char * format, va_list ap) 
+void Logger::writeLog(const int priority, const char *format, va_list va)
 {
-    if (useSyslog()) {
-        if (!Logger::m_isOpened)
-            Logger::openLog();
-        vsyslog(priority, format, ap);
-    } else {
-        char *msg = 0;
-        if (vasprintf(&msg, format, ap) < 0)
-            msg = 0;
-        else
-            strip(msg);
-        fprintf(stderr, "BOOSTER(%d): %s\n", (int)getpid(), msg ?: format);
-        fflush(stderr);
-        free(msg);
-    }
+    vreport((enum report_type)priority, format, va);
 }
 
 void Logger::logDebug(const char * format, ...)
 {
-    if (m_debugMode)
-    {
-        va_list ap;
-        va_start(ap, format);
-        writeLog(LOG_DEBUG, format, ap);
-        va_end(ap);
-    }
+    va_list va;
+    va_start(va, format);
+    Logger::writeLog(report_debug, format, va);
+    va_end(va);
 }
 
 void Logger::logInfo(const char * format, ...)
 {
-    va_list ap;
-    va_start(ap, format);
-    writeLog(LOG_INFO, format, ap); 
-    va_end(ap);
-    // To avoid extra file descriptors in forked boosters closing connection to syslog
-    Logger::closeLog();
+    va_list va;
+    va_start(va, format);
+    Logger::writeLog(report_info, format, va);
+    va_end(va);
 }
 
 void Logger::logWarning(const char * format, ...)
 {
-    va_list ap;
-    va_start(ap, format);
-    writeLog(LOG_WARNING, format, ap);
-    va_end(ap);
+    va_list va;
+    va_start(va, format);
+    Logger::writeLog(report_warning, format, va);
+    va_end(va);
 }
 
 void Logger::logError(const char * format, ...)
 {
-    va_list ap;
-    va_start(ap, format);
-    writeLog(LOG_ERR, format, ap);
-    va_end(ap);
+    va_list va;
+    va_start(va, format);
+    Logger::writeLog(report_error, format, va);
+    va_end(va);
 }
 
 void Logger::setDebugMode(bool enable)
 {
-    Logger::m_debugMode = enable;
+    if ((Logger::m_debugMode = enable))
+        report_set_type(report_debug);
+    else
+        report_set_type(report_warning);
 }
 

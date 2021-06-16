@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <fstream>
 #include <dirent.h>
+#include <string.h>
 
 AppData::AppData() :
     m_options(0),
@@ -71,7 +72,9 @@ bool AppData::disableOutOfMemAdj() const
 
 void AppData::setArgc(int newArgc)
 {
-    m_argc = newArgc;
+    (void)newArgc; // unused
+    // kept for the sake of binary compatibility
+    // setArgv() sets also m_argc
 }
 
 int AppData::argc() const
@@ -81,12 +84,25 @@ int AppData::argc() const
 
 void AppData::setArgv(const char ** newArgv)
 {
-    m_argv = newArgv;
+    for (int i = 0; i < m_argc; ++i)
+        free(m_argv[i]);
+    free(m_argv);
+    m_argc = 0;
+    m_argv = nullptr;
+
+    if (newArgv) {
+        while (newArgv[m_argc])
+            ++m_argc;
+        m_argv = (char **)calloc(m_argc + 1, sizeof *m_argv);
+        for (int i = 0; i < m_argc; ++i)
+            m_argv[i] = strdup(newArgv[i]);
+        m_argv[m_argc] = nullptr;
+    }
 }
 
 const char ** AppData::argv() const
 {
-    return m_argv;
+    return (const char **)m_argv;
 }
 
 void AppData::setAppName(const string & newAppName)
@@ -251,4 +267,5 @@ string AppData::privileges() const
 
 AppData::~AppData()
 {
+    setArgv(nullptr);
 }

@@ -21,6 +21,7 @@
 
 #include "daemon.h"
 #include "logger.h"
+#include "report.h"
 #include "connection.h"
 #include "booster.h"
 #include "singleinstance.h"
@@ -46,6 +47,7 @@
 #include <systemd/sd-daemon.h>
 #include <unistd.h>
 #include <poll.h>
+#include <getopt.h>
 
 #include "coverage.h"
 
@@ -53,7 +55,7 @@
  * async-signals - which is useful only when actively debugging
  * booster / invoker interoperation.
  */
-#define VERBOSE_SIGNALS 0
+#define VERBOSE_SIGNALS 01
 
 
 // Environment
@@ -325,12 +327,12 @@ Daemon::Daemon(int & argc, char * argv[]) :
         throw std::runtime_error("Daemon: Daemon already created!\n");
     }
 
-    // Parse arguments
-    parseArgs(ArgVect(argv, argv + argc));
-
     // Store arguments list
     m_initialArgv = argv;
     m_initialArgc = argc;
+
+    // Parse arguments
+    parseArgs(argc, argv);
 
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, m_boosterLauncherSocket) == -1)
     {
@@ -550,63 +552,62 @@ void Daemon::run(Booster *booster)
 void Daemon::readFromBoosterSocket(int fd)
 {
     pid_t invokerPid = 0;
-    int delay        = 0;
-    struct msghdr   msg;
+    int delay = 0;
+    int socketFd = -1;
+
+    struct iovec iov[2];
+    char buf[CMSG_SPACE(sizeof socketFd)];
+    struct msghdr msg;
     struct cmsghdr *cmsg;
-    struct iovec    iov[2];
-    char buf[CMSG_SPACE(sizeof(int))];
+
+    memset(iov, 0, sizeof iov);
+    memset(buf, 0, sizeof buf);
+    memset(&msg, 0, sizeof msg);
 
     iov[0].iov_base = &invokerPid;
-    iov[0].iov_len  = sizeof(pid_t);
+    iov[0].iov_len = sizeof invokerPid;
     iov[1].iov_base = &delay;
-    iov[1].iov_len  = sizeof(int);
+    iov[1].iov_len = sizeof delay;
 
     msg.msg_iov        = iov;
     msg.msg_iovlen     = 2;
     msg.msg_name       = NULL;
     msg.msg_namelen    = 0;
     msg.msg_control    = buf;
-    msg.msg_controllen = sizeof(buf);
+    msg.msg_controllen = sizeof buf;
 
-    if (recvmsg(fd, &msg, 0) >= 0)
-    {
-        Logger::logDebug("Daemon: boosters's pid: %d\n", m_boosterPid);
-        Logger::logDebug("Daemon: invoker's pid: %d\n", invokerPid);
-        Logger::logDebug("Daemon: respawn delay: %d \n", delay);
+    if (recvmsg(fd, &msg, 0) == -1) {
+        Logger::logError("Daemon: Critical error communicating with booster. Exiting applauncherd.\n");
+        exit(EXIT_FAILURE);
+    }
 
-        int newFd = -1;
-
-        if (invokerPid > 0) {
-            /* invokerPid got filled in at recvmsg() => we have fd too */
-            cmsg = CMSG_FIRSTHDR(&msg);
-            memcpy(&newFd, CMSG_DATA(cmsg), sizeof(int));
-            Logger::logDebug("Daemon: socket file descriptor: %d\n", newFd);
-        }
-
-        if (m_boosterPid > 0) {
-            /* We were expecting booster details => update bookkeeping */
-            if (newFd != -1) {
-                // Store booster pid - invoker socket pair
-                m_boosterPidToInvokerFd[m_boosterPid] = newFd;
-                newFd = -1;
-            }
-            if (invokerPid > 0) {
-                // Store booster pid - invoker pid pair
-                m_boosterPidToInvokerPid[m_boosterPid] = invokerPid;
-            }
-        }
-
-        if (newFd != -1) {
-            /* If we are not going to use the received fd, it needs to be closed */
-            Logger::logWarning("Daemon: close stray socket file descriptor: %d\n", newFd);
-            close(newFd);
+    for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+        if (cmsg->cmsg_level == SOL_SOCKET &&
+            cmsg->cmsg_type == SCM_RIGHTS &&
+            cmsg->cmsg_len >= CMSG_LEN(sizeof(socketFd))) {
+            memcpy(&socketFd, CMSG_DATA(cmsg), sizeof socketFd);
         }
     }
-    else
-    {
-        Logger::logError("Daemon: Nothing read from the socket\n");
-        // Critical error communicating with booster. Exiting applauncherd.
-        _exit(EXIT_FAILURE);
+
+    Logger::logDebug("Daemon: booster=%d invoker=%d socket=%d delay=%d\n",
+                     m_boosterPid, invokerPid, socketFd, delay);
+
+    if (m_boosterPid > 0) {
+        /* We were expecting booster details => update bookkeeping */
+        if (socketFd != -1) {
+            // Store booster pid - invoker socket pair
+            m_boosterPidToInvokerFd[m_boosterPid] = socketFd, socketFd = -1;
+        }
+        if (invokerPid > 0) {
+            // Store booster pid - invoker pid pair
+            m_boosterPidToInvokerPid[m_boosterPid] = invokerPid;
+        }
+    }
+
+    if (socketFd != -1) {
+        /* If we are not going to use the received fd, it needs to be closed */
+        Logger::logWarning("Daemon: close stray socket file descriptor: %d\n", socketFd);
+        close(socketFd);
     }
 
     // 2nd param guarantees some time for the just launched application
@@ -918,72 +919,93 @@ void Daemon::daemonize()
     }
 }
 
-void Daemon::parseArgs(const ArgVect & args)
+
+void Daemon::parseArgs(int argc, char **argv)
 {
-    std::deque<string> queue;
-    for (ArgVect::const_iterator i(args.begin() + 1); i != args.end(); i++)
-        queue.push_back(*i);
-
-    while (!queue.empty()) {
-        string option(queue.front());
-        queue.pop_front();
-
-        if (option == "--boot-mode" || option == "-b")
-        {
-            Logger::logInfo("Daemon: Boot mode set.");
-            m_bootMode = true;
-        }
-        else if (option == "--daemon" || option == "-d")
-        {
-            m_daemon = true;
-        }
-        else if (option == "--debug")
-        {
+    // Options recognized
+    static const struct option longopts[] = {
+        { "help",             no_argument,       NULL, 'h' },
+        { "verbose",          no_argument,       NULL, 'v' },
+        { "debug",            no_argument,       NULL, 'v' },
+        { "boot-mode",        no_argument,       NULL, 'b' },
+        { "daemon",           no_argument,       NULL, 'd' },
+        { "systemd",          no_argument,       NULL, 'n' },
+        { "application",      required_argument, NULL, 'a' },
+        { 0, 0, 0, 0}
+    };
+    static const char shortopts[] =
+        "+"  // use posix rules
+        "h"  // --help
+        "v"  // --verbose --debug
+        "b"  // --boot-mode
+        "d"  // --daemon
+        "n"  // --systemd
+        "a:" // --application=<APP>
+        ;
+    for (;;) {
+        int opt = getopt_long(argc, argv, shortopts, longopts, NULL);
+        if (opt == -1)
+            break;
+        switch (opt) {
+        case 'h':
+            usage(*argv, EXIT_SUCCESS);
+            break;
+        case 'v':
             Logger::setDebugMode(true);
             m_debugMode = true;
-        }
-        else if (option == "--help" || option == "-h")
-        {
-            usage(args[0].c_str(), EXIT_SUCCESS);
-        }
-        else if (option == "--systemd")
-        {
+            break;
+        case 'b':
+            Logger::logInfo("Daemon: Boot mode set.");
+            m_bootMode = true;
+            break;
+        case 'd':
+            m_daemon = true;
+            break;
+        case 'n':
             m_notifySystemd = true;
-        }
-        else if (option == "--application" || option == "-a")
-        {
-            if (!queue.empty()) {
-                m_boostedApplication = queue.front();
-                queue.pop_front();
-            }
-        }
-        else
-        {
-            if (option.find_first_not_of(' ') != string::npos)
-               usage(args[0].c_str(), EXIT_FAILURE);
+            break;
+        case 'a':
+            m_boostedApplication = optarg;
+            break;
+        default:
+        case '?':
+            usage(*argv, EXIT_FAILURE);
         }
     }
+    if (optind < argc)
+        usage(*argv, EXIT_FAILURE);
 }
 
 // Prints the usage and exits with given status
 void Daemon::usage(const char *name, int status)
 {
-    printf("\nUsage: %s [options]\n\n"
-           "Start the application launcher daemon.\n\n"
+    name = basename(name);
+    printf("\n"
+           "Start the application launcher daemon.\n"
+           "\n"
+           "Usage:\n"
+           "  %s [options]\n"
+           "\n"
            "Options:\n"
-           "  -b, --boot-mode  Start %s in the boot mode. This means that\n"
+           "  -b, --boot-mode\n"
+           "                   Start %s in the boot mode. This means that\n"
            "                   boosters will not initialize caches and booster\n"
            "                   respawn delay is set to zero.\n"
            "                   Normal mode is restored by sending SIGUSR1\n"
            "                   to the launcher.\n"
            "                   Boot mode can be activated also by sending SIGUSR2\n"
            "                   to the launcher.\n"
-           "  -d, --daemon     Run as %s a daemon.\n"
-           "  -a, --application <application>\n"
+           "  -d, --daemon\n"
+           "                   Run as %s a daemon.\n"
+           "  -a, --application=<application>\n"
            "                   Run as application specific booster.\n"
-           "  --systemd        Notify systemd when initialization is done\n"
-           "  --debug          Enable debug messages and log everything also to stdout.\n"
-           "  -h, --help       Print this help.\n\n",
+           "  -n, --systemd\n"
+           "                   Notify systemd when initialization is done\n"
+           "  -h, --help\n"
+           "                   Print this help.\n"
+           "  -v, --verbose, --debug\n"
+           "                   Make diagnostic logging more verbose.\n"
+           "\n",
            name, name, name);
 
     exit(status);

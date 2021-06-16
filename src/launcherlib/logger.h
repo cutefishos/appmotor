@@ -100,11 +100,11 @@ private:
 #endif
 };
 
-/* Allow the same logging API to be used in booster and invoker */
-#define error(  FMT, ARGS...) Logger::logError(  FMT, ##ARGS)
-#define warning(FMT, ARGS...) Logger::logWarning(FMT, ##ARGS)
-#define info(   FMT, ARGS...) Logger::logInfo(   FMT, ##ARGS)
-#define debug(  FMT, ARGS...) Logger::logDebug(  FMT, ##ARGS)
+// QUARANTINE /* Allow the same logging API to be used in booster and invoker */
+// QUARANTINE #define error(  FMT, ARGS...) Logger::logError(  FMT, ##ARGS)
+// QUARANTINE #define warning(FMT, ARGS...) Logger::logWarning(FMT, ##ARGS)
+// QUARANTINE #define info(   FMT, ARGS...) Logger::logInfo(   FMT, ##ARGS)
+// QUARANTINE #define debug(  FMT, ARGS...) Logger::logDebug(  FMT, ##ARGS)
 
 #endif // LOGGER_H
 

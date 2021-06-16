@@ -113,8 +113,7 @@ private:
     Daemon & operator= (const Daemon & r);
 
     //! Parse arguments
-    typedef vector<string> ArgVect;
-    void parseArgs(const ArgVect & args);
+    void parseArgs(int argc, char **argv);
 
     //! Fork to a daemon
     void daemonize();

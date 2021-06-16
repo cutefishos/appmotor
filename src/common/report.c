@@ -17,16 +17,39 @@
 **
 ****************************************************************************/
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
-#include <syslog.h>
+#include <string.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 
 #include "report.h"
 
 static enum report_output output = report_guess;
+static enum report_type level = report_warning;
+
+static const char *progname(void)
+{
+    static const char *name = NULL;
+    if (!name) {
+        char buff[PATH_MAX];
+        char path[PATH_MAX];
+        snprintf(path, sizeof path, "/proc/%d/exe", (int)getpid());
+        int n = readlink(path, buff, sizeof buff);
+        if (n > 0 && n < (int)sizeof buff) {
+            buff[n] = 0;
+            /* Note: this is intentionally never released */
+            name = strdup(basename(buff));
+        }
+        if (!name)
+            name = "unknown";
+    }
+    return name;
+}
 
 static char *strip(char *str)
 {
@@ -49,64 +72,94 @@ static char *strip(char *str)
     return str;
 }
 
-void report_set_output(enum report_output new_output)
+extern enum report_type report_get_type(void)
 {
-    if (output == new_output)
-        return;
-
-    if (output == report_syslog)
-        closelog();
-
-    if (new_output == report_syslog)
-        openlog(PROG_NAME_INVOKER, LOG_PID, LOG_DAEMON);
-
-    output = new_output;
+    return level;
 }
 
-static void vreport(enum report_type type, const char *msg, va_list arg)
+static enum report_type normalize_type(enum report_type type)
 {
-    char str[400];
-    char *str_type = "";
-    int log_type;
+    if (type < report_minimum)
+        return report_minimum;
+    if (type > report_maximum)
+        return report_maximum;
+    return type;
+}
 
-    switch (type)
-    {
+extern void report_set_type(enum report_type type)
+{
+    level = normalize_type(type);
+}
+
+enum report_output report_get_output(void)
+{
+    if (output == report_guess)
+        report_set_output(isatty(STDIN_FILENO) ? report_console : report_syslog);
+    return output;
+}
+
+void report_set_output(enum report_output new_output)
+{
+    if (output != new_output) {
+        if (output == report_syslog)
+            closelog();
+
+        output = new_output;
+
+        if (output == report_syslog)
+            openlog(PROG_NAME_INVOKER, LOG_PID, LOG_DAEMON);
+    }
+}
+
+void vreport(enum report_type type, const char *msg, va_list arg)
+{
+    /* Any errors during logging must not change errno */
+    int saved = errno;
+
+    if ((type = normalize_type(type)) > level)
+        goto EXIT;
+
+    char *str_type = "";
+    switch (type) {
     case report_debug:
-        log_type = LOG_DEBUG;
+        str_type = "debug: ";
         break;
-    default:
     case report_info:
-        log_type = LOG_INFO;
+        str_type = "info: ";
+        break;
+    case report_notice:
+        str_type = "notice: ";
         break;
     case report_warning:
         str_type = "warning: ";
-        log_type = LOG_WARNING;
         break;
     case report_error:
         str_type = "error: ";
-        log_type = LOG_ERR;
         break;
     case report_fatal:
         str_type = "died: ";
-        log_type = LOG_ERR;
+        break;
+    default:
         break;
     }
 
+    char str[400];
     vsnprintf(str, sizeof(str), msg, arg);
 
-    if (output == report_guess) {
-        if (isatty(STDIN_FILENO))
-            output = report_console;
-        else
-            output = report_syslog;
+    switch (report_get_output()) {
+    case report_console:
+        fprintf(stderr, "%s: %s%s\n", progname(), str_type, strip(str));
+        fflush(stderr);
+        break;
+    case report_syslog:
+        syslog(type, "%s%s", str_type, str);
+        break;
+    default:
+        break;
     }
 
-    if (output == report_console) {
-        fprintf(stderr, "%s: %s%s\n", PROG_NAME_INVOKER, str_type, strip(str));
-        fflush(stderr);
-    } else if (output == report_syslog) {
-        syslog(log_type, "%s%s", str_type, str);
-    }
+EXIT:
+    errno = saved;
 }
 
 void report(enum report_type type, const char *msg, ...)
