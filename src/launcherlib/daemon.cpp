@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <fstream>
 #include <sstream>
+#include <libgen.h>
 #include <stdlib.h>
 #include <systemd/sd-daemon.h>
 #include <unistd.h>
@@ -979,7 +980,8 @@ void Daemon::parseArgs(int argc, char **argv)
 // Prints the usage and exits with given status
 void Daemon::usage(const char *name, int status)
 {
-    name = basename(name);
+    char *nameCopy = strdup(name);
+    name = basename(nameCopy);
     printf("\n"
            "Start the application launcher daemon.\n"
            "\n"
@@ -1007,6 +1009,8 @@ void Daemon::usage(const char *name, int status)
            "                   Make diagnostic logging more verbose.\n"
            "\n",
            name, name, name);
+
+    free(nameCopy);
 
     exit(status);
 }
