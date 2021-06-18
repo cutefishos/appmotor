@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0)
 cmake_policy(VERSION 3.0)
 
 project(Applauncherd
-	VERSION 4.1.43
+	VERSION 4.2.3
 	DESCRIPTION "A daemon that helps to launch applications faster")
 
 find_package(ECM REQUIRED NO_MODULE)
