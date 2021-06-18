@@ -1,9 +1,9 @@
 Name:       mapplauncherd
 Summary:    Application launcher for fast startup
-Version:    4.2.2
+Version:    4.2.3
 Release:    1
 License:    LGPLv2+
-URL:        https://git.merproject.org/mer-core/mapplauncherd
+URL:        https://github.com/sailfishos/mapplauncherd
 Source0:    %{name}-%{version}.tar.bz2
 Source1:    booster-cgroup-mount.service
 Requires:   systemd-user-session-targets
