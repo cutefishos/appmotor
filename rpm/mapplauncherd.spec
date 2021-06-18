@@ -10,6 +10,7 @@ Requires:   systemd-user-session-targets
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 Requires(pre):  sailfish-setup
+BuildRequires:  extra-cmake-modules
 BuildRequires:  pkgconfig(libshadowutils)
 BuildRequires:  pkgconfig(systemd)
 BuildRequires:  pkgconfig(dbus-1)
@@ -93,6 +94,7 @@ install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/boo
 %files devel
 %defattr(-,root,root,-)
 %{_includedir}/applauncherd/*
+%{_libdir}/pkgconfig/*.pc
 
 %files cgroup
 %{_unitdir}/booster-cgroup-mount.service

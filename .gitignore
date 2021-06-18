@@ -21,3 +21,4 @@ tests/perftests/hello_no_launcher/hello_no_launcher
 tests/perftests/launcher_perf.txt
 build-stamp
 configure-stamp
+build

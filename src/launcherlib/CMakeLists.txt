@@ -1,5 +1,3 @@
-include(GNUInstallDirs)
-
 set(COMMON ${CMAKE_HOME_DIRECTORY}/src/common)
 
 # Find systemd
@@ -29,12 +27,24 @@ set(HEADERS appdata.h booster.h connection.h daemon.h logger.h launcherlib.h
 link_libraries(${GLIB_LDFLAGS} ${DBUS_LDFLAGS} ${LIBDL} "-L/lib -lsystemd -lcap")
 
 # Set executable
-add_library(applauncherd MODULE ${SRC} ${MOC_SRC})
-set_target_properties(applauncherd PROPERTIES VERSION 0.1 SOVERSION 0)
-
+add_library(applauncherd SHARED ${SRC} ${MOC_SRC})
 target_link_libraries(applauncherd ${SYSTEMD_LIBRARIES})
 
+set_target_properties(applauncherd PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR})
+
+# Configure and install the pkgconfig file
+ecm_generate_pkgconfig_file(
+	BASE_NAME applauncherd
+	FILENAME_VAR applauncherd
+	DESCRIPTION ${PROJECT_DESCRIPTION}
+	INSTALL)
+
 # Add install rule
-install(TARGETS applauncherd DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR})
-install(FILES ${HEADERS} DESTINATION ${CMAKE_INSTALL_FULL_INCLUDEDIR}/applauncherd
-  PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+install(TARGETS applauncherd
+    LIBRARY DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR})
+install(FILES ${HEADERS}
+    DESTINATION ${CMAKE_INSTALL_FULL_INCLUDEDIR}/applauncherd
+    COMPONENT Devel
+    PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
