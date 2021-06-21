@@ -45,7 +45,7 @@ Scripts and services files for application launcher to mount
 booster cgroup at startup.
 
 %prep
-%setup -q -n %{name}-%{version}
+%autosetup -n %{name}-%{version}
 
 %build
 export BUILD_TESTS=1
@@ -54,10 +54,9 @@ unset LD_AS_NEEDED
 
 rm -f CMakeCache.txt
 %cmake
-make %{?_smp_mflags}
+%make_build
 
 %install
-rm -rf %{buildroot}
 %make_install
 
 # Don't use %exclude, remove at install phase
@@ -74,8 +73,7 @@ ln -s ../booster-cgroup-mount.service %{buildroot}%{_unitdir}/multi-user.target.
 
 install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/booster-cgroup-mount
 
-%post
-/sbin/ldconfig
+%post -p /sbin/ldconfig
 
 %postun -p /sbin/ldconfig
 
@@ -85,7 +83,7 @@ install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/boo
 %dir %{_datadir}/mapplauncherd/privileges.d
 %{_bindir}/invoker
 %{_bindir}/single-instance
-%{_libdir}/libapplauncherd.so*
+%{_libdir}/libapplauncherd.so.*
 %attr(2755, root, privileged) %{_libexecdir}/mapplauncherd/booster-generic
 %{_userunitdir}/booster-generic.service
 %{_userunitdir}/booster-generic@.service
@@ -94,6 +92,7 @@ install -D -m 0755 scripts/booster-cgroup-mount %{buildroot}/usr/lib/startup/boo
 %files devel
 %defattr(-,root,root,-)
 %{_includedir}/applauncherd/*
+%{_libdir}/libapplauncherd.so
 %{_libdir}/pkgconfig/*.pc
 
 %files cgroup
