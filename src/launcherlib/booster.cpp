@@ -57,6 +57,11 @@
 
 #include "sailjail.h"
 
+static std::string basename(const std::string &str)
+{
+    return str.substr(str.find_last_of("/") + 1);
+}
+
 Booster::Booster() :
     m_appData(new AppData),
     m_connection(NULL),
@@ -287,6 +292,12 @@ int Booster::run(SocketManager * socketManager)
             if (boostedApplication() != "default") {
                 if (!sailjail_verify_launch(boostedApplication().c_str(), m_appData->argv()))
                     throw std::runtime_error("Booster: Binary doesn't have launch permissions\n");
+            } else if (m_appData->fileName() != SAILJAIL_PATH &&
+                    sailjail_sandbox(basename(m_appData->fileName()).c_str())) {
+                Logger::logDebug("Sandboxing '%s'", m_appData->fileName());
+                // Prepend sailjail to arguments
+                m_appData->prependArgv(SAILJAIL_PATH);
+                m_appData->setFileName(SAILJAIL_PATH);
             }
 
             return launchProcess();
@@ -701,7 +712,7 @@ void Booster::resetOomAdj()
 
 std::string Booster::getFinalName(const std::string &name)
 {
-    if (name == "/usr/bin/sailjail") {
+    if (name == SAILJAIL_PATH) {
         // This doesn't implement sailjail's parsing logic but instead
         // has some assumptions about the arguments:
         // - If there is --, then the application is

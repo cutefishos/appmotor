@@ -6,7 +6,11 @@
 
 G_BEGIN_DECLS
 
+#define SAILJAIL_PATH "/usr/bin/sailjail"
+
 bool sailjail_verify_launch(const char *desktop, const char **argv);
+
+bool sailjail_sandbox(const char *desktop);
 
 G_END_DECLS
 

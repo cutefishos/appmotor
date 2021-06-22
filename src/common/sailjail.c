@@ -26,6 +26,7 @@
 #define SAILJAIL_KEY_ORGANIZATION_NAME "OrganizationName"
 #define SAILJAIL_KEY_APPLICATION_NAME "ApplicationName"
 #define SAILJAIL_KEY_PERMISSIONS "Permissions"
+#define SAILJAIL_KEY_MODE "Mode"
 #define NEMO_KEY_APPLICATION_TYPE "X-Nemo-Application-Type"
 #define NEMO_KEY_SINGLE_INSTANCE "X-Nemo-Single-Instance"
 #define MAEMO_KEY_FIXED_ARGS "X-Maemo-Fixed-Args"
@@ -48,6 +49,10 @@
 #define PERMISSIONMGR_SIGNAL_APP_ADDED "ApplicationAdded"
 #define PERMISSIONMGR_SIGNAL_APP_CHANGED "ApplicationChanged"
 #define PERMISSIONMGR_SIGNAL_APP_REMOVED "ApplicationRemoved"
+
+/* Sailjaild errors */
+#define CODE_INVALID_ARGS     "org.freedesktop.DBus.Error.InvalidArgs"
+#define ERROR_INVALID_APPNAME "Invalid application name: "
 
 static DBusConnection *
 sailjail_connect_bus(void)
@@ -121,7 +126,7 @@ iter_at(DBusMessageIter *iter, int type)
 static GHashTable *
 sailjail_application_info(DBusConnection *con, const char *desktop)
 {
-    GHashTable *info = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_variant_unref);
+    GHashTable *info = NULL;
     DBusError err = DBUS_ERROR_INIT;
     DBusMessage *req = NULL;
     DBusMessage *rsp = NULL;
@@ -140,7 +145,10 @@ sailjail_application_info(DBusConnection *con, const char *desktop)
     }
 
     if (!(rsp = dbus_connection_send_with_reply_and_block(con, req, DBUS_TIMEOUT_INFINITE, &err))) {
-        error("method call failed: %s: %s", err.name, err.message);
+        if (strcmp(err.name, CODE_INVALID_ARGS) ||
+                strncmp(err.message, ERROR_INVALID_APPNAME, strlen(ERROR_INVALID_APPNAME))) {
+            error("method call failed: %s: %s", err.name, err.message);
+        }
         goto EXIT;
     }
 
@@ -159,6 +167,8 @@ sailjail_application_info(DBusConnection *con, const char *desktop)
         error("reply is not an array");
         goto EXIT;
     }
+
+    info = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_variant_unref);
 
     DBusMessageIter ArrayIter;
     dbus_message_iter_recurse(&bodyIter, &ArrayIter);
@@ -556,4 +566,30 @@ EXIT:
     sailjail_disconnect_bus(con);
 
     return allowed;
+}
+
+bool sailjail_sandbox(const char *desktop)
+{
+    bool sandboxed = false;
+    DBusConnection *con = NULL;
+    GHashTable *info = NULL;
+    const char *mode;
+
+    if (!(con = sailjail_connect_bus()))
+        goto EXIT;
+
+    if (!(info = sailjail_application_info(con, desktop)))
+        goto EXIT;
+
+    if ((mode = appinfo_string(info, SAILJAIL_KEY_MODE)) && g_strcmp0(mode, "None")) {
+        // Mode is either "Normal" or "Compatibility"
+        sandboxed = true;
+    }
+
+EXIT:
+    if (info)
+        g_hash_table_destroy(info);
+    sailjail_disconnect_bus(con);
+
+    return sandboxed;
 }

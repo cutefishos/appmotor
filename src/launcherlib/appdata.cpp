@@ -19,6 +19,7 @@
 
 #include "appdata.h"
 #include "protocol.h"
+#include "sailjail.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
@@ -98,6 +99,16 @@ void AppData::setArgv(const char ** newArgv)
             m_argv[i] = strdup(newArgv[i]);
         m_argv[m_argc] = nullptr;
     }
+}
+
+void AppData::prependArgv(const char * arg)
+{
+    char **oldArgv = m_argv;
+    m_argv = (char **)calloc(++m_argc + 1, sizeof *m_argv);
+    m_argv[0] = strdup(arg);
+    for (int i = 1; i < m_argc + 1; ++i)
+        m_argv[i] = oldArgv[i-1];
+    free(oldArgv);
 }
 
 const char ** AppData::argv() const
@@ -237,6 +248,16 @@ void AppData::checkPrivileges()
         And then, any file in
             /usr/share/mapplauncherd/privileges.d/
      */
+
+    /* Sailjail does not use this system to gain privileged group.
+     * It is skipped to avoid unintended consequenses when launching
+     * other apps via sailjail.
+     */
+    if (m_fileName == SAILJAIL_PATH) {
+        m_privileges.clear();
+        return;
+    }
+
     static const char *BOOSTER_APP_PRIVILEGES_LIST = "/usr/share/mapplauncherd/privileges";
     static const char *BOOSTER_APP_PRIVILEGES_DIR = "/usr/share/mapplauncherd/privileges.d";
     m_privileges = getPrivileges(BOOSTER_APP_PRIVILEGES_LIST);

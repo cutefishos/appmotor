@@ -72,6 +72,9 @@ public:
     //! Set address of the argument vector
     void setArgv(const char ** argv);
 
+    //! Prepend to argv
+    void prependArgv(const char *arg);
+
     //! Return address of the argument vector
     const char ** argv() const;
 
