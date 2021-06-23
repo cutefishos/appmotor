@@ -24,7 +24,7 @@ set(HEADERS appdata.h booster.h connection.h daemon.h logger.h launcherlib.h
 
 # Set libraries to be linked. Shared libraries to be preloaded are not linked in anymore,
 # but dlopen():ed and listed in src/launcher/preload.h instead.
-link_libraries(${GLIB_LDFLAGS} ${DBUS_LDFLAGS} ${LIBDL} "-L/lib -lsystemd -lcap")
+link_libraries(${GLIB_LDFLAGS} ${DBUS_LDFLAGS} ${LIBDL} "-L/lib -lcap")
 
 # Set executable
 add_library(applauncherd SHARED ${SRC} ${MOC_SRC})
