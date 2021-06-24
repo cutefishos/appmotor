@@ -1115,9 +1115,14 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    // Application specific boosters are running in sandbox and can
+    // thus launch only sandboxed processes, otherwise
     // If arguments don't define sailjail and sailjaild says the app must be sandboxed,
     // we force sandboxing here
-    if (strcmp(args.prog_name, SAILJAIL_PATH) && ask_for_sandboxing(args.prog_name)) {
+    if (!strcmp(args.app_name, UNDEFINED_APPLICATION) &&
+        strcmp(args.prog_name, SAILJAIL_PATH) &&
+        ask_for_sandboxing(args.prog_name)) {
+        warning("enforcing sandboxing for '%s'", args.prog_name);
         // We must use generic booster here as nothing else would work
         // to run sailjail which is not compiled for launching via booster
         args.app_type = BOOSTER_GENERIC;
