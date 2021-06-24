@@ -53,11 +53,16 @@
 #define BOOSTER_SESSION "silica-session"
 #define BOOSTER_GENERIC "generic"
 
+/* Placeholder value used for regular boosters (that are not
+ * sandboxed application boosters).
+ */
+#define UNDEFINED_APPLICATION "default"
+
 /* Setting VERBOSE_SIGNALS to non-zero value logs receiving of
  * async-signals - which is useful only when actively debugging
  * booster / invoker interoperation.
  */
-#define VERBOSE_SIGNALS 01
+#define VERBOSE_SIGNALS 0
 
 // Utility functions
 static char *strip(char *str)
@@ -588,6 +593,7 @@ static void usage(int status)
            "Options:\n"
            "  -t, --type TYPE        Define booster type\n"
            "  -a, --application APP  Define application booster name\n"
+           "  -A, --auto-application Get application booster name from binary\n"
            "  -d, --delay SECS       After invoking sleep for SECS seconds\n"
            "                         (default %d).\n"
            "  -r, --respawn SECS     After invoking respawn new booster after SECS seconds\n"
@@ -774,7 +780,7 @@ typedef struct InvokeArgs {
     .prog_argv     = NULL,\
     .prog_name     = NULL,\
     .app_type      = NULL,\
-    .app_name      = "default",\
+    .app_name      = UNDEFINED_APPLICATION,\
     .magic_options = INVOKER_MSG_MAGIC_OPTION_WAIT,\
     .wait_term     = true,\
     .respawn_delay = RESPAWN_DELAY,\
@@ -886,7 +892,7 @@ static int invoke(InvokeArgs *args)
 
     /* Application aware boosters
      * - have fallback strategy, but it
-     * - must not cross application vs "default" boundary
+     * - must not cross application vs UNDEFINED_APPLICATION boundary
      */
     if (fd == -1 && !tried_session) {
         bool tried_generic = false;
@@ -905,7 +911,7 @@ static int invoke(InvokeArgs *args)
             fd = -1;
     } else if (tried_session) {
         warning("Launch failed, session booster is not available.\n");
-    } else if (strcmp(args->app_name, "default")) {
+    } else if (strcmp(args->app_name, UNDEFINED_APPLICATION)) {
         /* Boosters that deal explicitly with one application only
          * must be assumed to run within sandbox -> skipping boosting
          * would also skip sandboxing -> no direct launch fallback
@@ -929,7 +935,7 @@ static int invoke(InvokeArgs *args)
 int main(int argc, char *argv[])
 {
     InvokeArgs args = INVOKE_ARGS_INIT;
-
+    bool auto_application = false;
     // Called with a different name (old way of using invoker) ?
     if (!strstr(argv[0], PROG_NAME_INVOKER) )
     {
@@ -951,6 +957,7 @@ int main(int argc, char *argv[])
         {"test-mode",        no_argument,       NULL, 'T'},
         {"type",             required_argument, NULL, 't'},
         {"application",      required_argument, NULL, 'a'},
+        {"auto-application", no_argument,       NULL, 'A'},
         {"delay",            required_argument, NULL, 'd'},
         {"respawn",          required_argument, NULL, 'r'},
         {"splash",           required_argument, NULL, 'S'}, // Legacy, ignored
@@ -964,7 +971,7 @@ int main(int argc, char *argv[])
     // The use of + for POSIXLY_CORRECT behavior is a GNU extension, but avoids polluting
     // the environment
     int opt;
-    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:r:S:L:F:", longopts, NULL)) != -1)
+    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:Ar:S:L:F:", longopts, NULL)) != -1)
     {
         switch(opt)
         {
@@ -1007,6 +1014,11 @@ int main(int argc, char *argv[])
 
         case 'a':
             args.app_name = optarg;
+            auto_application = false;
+            break;
+
+        case 'A':
+            auto_application = true;
             break;
 
         case 'd':
@@ -1077,6 +1089,9 @@ int main(int argc, char *argv[])
         if (!(args.prog_name = strdup(args.prog_argv[0])))
             exit(EXIT_FAILURE);
     }
+
+    if (auto_application)
+        args.app_name = basename(args.prog_argv[0]);
 
     if (!args.app_type) {
         report(report_error, "Application type must be specified with --type.\n");
