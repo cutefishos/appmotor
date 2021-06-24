@@ -48,6 +48,7 @@
 #include "protocol.h"
 #include "invokelib.h"
 #include "search.h"
+#include "sailjail.h"
 
 #define BOOSTER_SESSION "silica-session"
 #define BOOSTER_GENERIC "generic"
@@ -627,7 +628,7 @@ static unsigned int get_delay(char *delay_arg, char *param_name,
     return delay;
 }
 
-static void notify_app_lauch(const char *desktop_file)
+static void notify_app_launch(const char *desktop_file)
 {
     DBusConnection *connection;
     DBusMessage *message;
@@ -649,6 +650,14 @@ static void notify_app_lauch(const char *desktop_file)
         dbus_error_free(&error);
         return;
     }
+}
+
+static bool ask_for_sandboxing(const char *app)
+{
+    char *path = strdup(app);
+    bool ret_val = sailjail_sandbox(basename(path));
+    free(path);
+    return ret_val;
 }
 
 static int wait_for_launched_process_to_exit(int socket_fd)
@@ -790,7 +799,7 @@ static int invoke_remote(int socket_fd, const InvokeArgs *args)
     invoker_send_end(socket_fd);
 
     if (args->desktop_file)
-        notify_app_lauch(args->desktop_file);
+        notify_app_launch(args->desktop_file);
 
     if (args->wait_term) {
         exit_status = wait_for_launched_process_to_exit(socket_fd),
@@ -1078,6 +1087,25 @@ int main(int argc, char *argv[])
     {
         report(report_error, "Creating a pipe for Unix signals failed!\n");
         exit(EXIT_FAILURE);
+    }
+
+    // If arguments don't define sailjail and sailjaild says the app must be sandboxed,
+    // we force sandboxing here
+    if (strcmp(args.prog_name, SAILJAIL_PATH) && ask_for_sandboxing(args.prog_name)) {
+        // We must use generic booster here as nothing else would work
+        // to run sailjail which is not compiled for launching via booster
+        args.app_type = BOOSTER_GENERIC;
+        // Prepend sailjail
+        char **old_argv = args.prog_argv;
+        args.prog_argc += 2;
+        args.prog_argv = (char **)calloc(args.prog_argc + 1, sizeof *args.prog_argv);
+        args.prog_argv[0] = SAILJAIL_PATH;
+        args.prog_argv[1] = "--";
+        for (int i = 2; i < args.prog_argc + 1; ++i)
+            args.prog_argv[i] = old_argv[i-2];
+        // Don't free old_argv because it's probably not dynamically allocated
+        free(args.prog_name);
+        args.prog_name = strdup(SAILJAIL_PATH);
     }
 
     // Send commands to the launcher daemon
