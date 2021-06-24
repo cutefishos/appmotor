@@ -569,18 +569,25 @@ static void invoker_send_end(int fd)
 // Prints the usage and exits with given status
 static void usage(int status)
 {
-    printf("\nUsage: %s [options] [--type=TYPE] [file] [args]\n\n"
+    printf("\n"
+           "Usage: %s [options] [--type=TYPE] [file] [args]\n"
+           "\n"
            "Launch applications compiled as a shared library (-shared) or\n"
-           "a position independent executable (-pie) through mapplauncherd.\n\n"
+           "a position independent executable (-pie) through mapplauncherd.\n"
+           "\n"
            "TYPE chooses the type of booster used. Qt-booster may be used to\n"
            "launch anything. Possible values for TYPE:\n"
            "  qt5                    Launch a Qt 5 application.\n"
            "  qtquick2               Launch a Qt Quick 2 (QML) application.\n"
            "  silica-qt5             Launch a Sailfish Silica application.\n"
-           "  generic                Launch any application, even if it's not a library.\n\n"
+           "  generic                Launch any application, even if it's not a library.\n"
+           "\n"
            "The TYPE may also be a comma delimited list of boosters to try. The first available\n"
-           "booster will be used.\n\n"
+           "booster will be used.\n"
+           "\n"
            "Options:\n"
+           "  -t, --type TYPE        Define booster type\n"
+           "  -a, --application APP  Define application booster name\n"
            "  -d, --delay SECS       After invoking sleep for SECS seconds\n"
            "                         (default %d).\n"
            "  -r, --respawn SECS     After invoking respawn new booster after SECS seconds\n"
@@ -590,6 +597,7 @@ static void usage(int status)
            "  -G, --global-syms      Places symbols in the application binary and its\n"
            "                         libraries to the global scope.\n"
            "                         See RTLD_GLOBAL in the dlopen manual page.\n"
+           "  -D, --deep-syms        (TBD)"
            "  -s, --single-instance  Launch the application as a single instance.\n"
            "                         The existing application window will be activated\n"
            "                         if already launched.\n"
@@ -597,8 +605,11 @@ static void usage(int status)
            "                         from the booster. The score is reset to 0 normally.\n"
            "  -T, --test-mode        Invoker test mode. Also control file in root home should be in place.\n"
            "  -F, --desktop-file     Desktop file of the application to notify lipstick of launching app.\n"
-           "  -h, --help             Print this help.\n\n"
-           "Example: %s --type=qt5 /usr/bin/helloworld\n\n",
+           "  -h, --help             Print this help.\n"
+           "  -v, --verbose          Make invoker more verbose. Can be given several times.\n"
+           "\n"
+           "Example: %s --type=qt5 /usr/bin/helloworld\n"
+           "\n",
            PROG_NAME_INVOKER, EXIT_DELAY, RESPAWN_DELAY, MAX_RESPAWN_DELAY, PROG_NAME_INVOKER);
 
     exit(status);
@@ -942,8 +953,8 @@ int main(int argc, char *argv[])
         {"application",      required_argument, NULL, 'a'},
         {"delay",            required_argument, NULL, 'd'},
         {"respawn",          required_argument, NULL, 'r'},
-        {"splash",           required_argument, NULL, 'S'},
-        {"splash-landscape", required_argument, NULL, 'L'},
+        {"splash",           required_argument, NULL, 'S'}, // Legacy, ignored
+        {"splash-landscape", required_argument, NULL, 'L'}, // Legacy, ignored
         {"desktop-file",     required_argument, NULL, 'F'},
         {"verbose",          no_argument,       NULL, 'v'},
         {0, 0, 0, 0}
