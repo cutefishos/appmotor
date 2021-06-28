@@ -53,11 +53,16 @@
 #define BOOSTER_SESSION "silica-session"
 #define BOOSTER_GENERIC "generic"
 
+/* Placeholder value used for regular boosters (that are not
+ * sandboxed application boosters).
+ */
+#define UNDEFINED_APPLICATION "default"
+
 /* Setting VERBOSE_SIGNALS to non-zero value logs receiving of
  * async-signals - which is useful only when actively debugging
  * booster / invoker interoperation.
  */
-#define VERBOSE_SIGNALS 01
+#define VERBOSE_SIGNALS 0
 
 // Utility functions
 static char *strip(char *str)
@@ -569,18 +574,26 @@ static void invoker_send_end(int fd)
 // Prints the usage and exits with given status
 static void usage(int status)
 {
-    printf("\nUsage: %s [options] [--type=TYPE] [file] [args]\n\n"
+    printf("\n"
+           "Usage: %s [options] [--type=TYPE] [file] [args]\n"
+           "\n"
            "Launch applications compiled as a shared library (-shared) or\n"
-           "a position independent executable (-pie) through mapplauncherd.\n\n"
+           "a position independent executable (-pie) through mapplauncherd.\n"
+           "\n"
            "TYPE chooses the type of booster used. Qt-booster may be used to\n"
            "launch anything. Possible values for TYPE:\n"
            "  qt5                    Launch a Qt 5 application.\n"
            "  qtquick2               Launch a Qt Quick 2 (QML) application.\n"
            "  silica-qt5             Launch a Sailfish Silica application.\n"
-           "  generic                Launch any application, even if it's not a library.\n\n"
+           "  generic                Launch any application, even if it's not a library.\n"
+           "\n"
            "The TYPE may also be a comma delimited list of boosters to try. The first available\n"
-           "booster will be used.\n\n"
+           "booster will be used.\n"
+           "\n"
            "Options:\n"
+           "  -t, --type TYPE        Define booster type\n"
+           "  -a, --application APP  Define application booster name\n"
+           "  -A, --auto-application Get application booster name from binary\n"
            "  -d, --delay SECS       After invoking sleep for SECS seconds\n"
            "                         (default %d).\n"
            "  -r, --respawn SECS     After invoking respawn new booster after SECS seconds\n"
@@ -590,6 +603,7 @@ static void usage(int status)
            "  -G, --global-syms      Places symbols in the application binary and its\n"
            "                         libraries to the global scope.\n"
            "                         See RTLD_GLOBAL in the dlopen manual page.\n"
+           "  -D, --deep-syms        (TBD)"
            "  -s, --single-instance  Launch the application as a single instance.\n"
            "                         The existing application window will be activated\n"
            "                         if already launched.\n"
@@ -597,8 +611,11 @@ static void usage(int status)
            "                         from the booster. The score is reset to 0 normally.\n"
            "  -T, --test-mode        Invoker test mode. Also control file in root home should be in place.\n"
            "  -F, --desktop-file     Desktop file of the application to notify lipstick of launching app.\n"
-           "  -h, --help             Print this help.\n\n"
-           "Example: %s --type=qt5 /usr/bin/helloworld\n\n",
+           "  -h, --help             Print this help.\n"
+           "  -v, --verbose          Make invoker more verbose. Can be given several times.\n"
+           "\n"
+           "Example: %s --type=qt5 /usr/bin/helloworld\n"
+           "\n",
            PROG_NAME_INVOKER, EXIT_DELAY, RESPAWN_DELAY, MAX_RESPAWN_DELAY, PROG_NAME_INVOKER);
 
     exit(status);
@@ -763,7 +780,7 @@ typedef struct InvokeArgs {
     .prog_argv     = NULL,\
     .prog_name     = NULL,\
     .app_type      = NULL,\
-    .app_name      = "default",\
+    .app_name      = UNDEFINED_APPLICATION,\
     .magic_options = INVOKER_MSG_MAGIC_OPTION_WAIT,\
     .wait_term     = true,\
     .respawn_delay = RESPAWN_DELAY,\
@@ -875,7 +892,7 @@ static int invoke(InvokeArgs *args)
 
     /* Application aware boosters
      * - have fallback strategy, but it
-     * - must not cross application vs "default" boundary
+     * - must not cross application vs UNDEFINED_APPLICATION boundary
      */
     if (fd == -1 && !tried_session) {
         bool tried_generic = false;
@@ -894,7 +911,7 @@ static int invoke(InvokeArgs *args)
             fd = -1;
     } else if (tried_session) {
         warning("Launch failed, session booster is not available.\n");
-    } else if (strcmp(args->app_name, "default")) {
+    } else if (strcmp(args->app_name, UNDEFINED_APPLICATION)) {
         /* Boosters that deal explicitly with one application only
          * must be assumed to run within sandbox -> skipping boosting
          * would also skip sandboxing -> no direct launch fallback
@@ -918,7 +935,7 @@ static int invoke(InvokeArgs *args)
 int main(int argc, char *argv[])
 {
     InvokeArgs args = INVOKE_ARGS_INIT;
-
+    bool auto_application = false;
     // Called with a different name (old way of using invoker) ?
     if (!strstr(argv[0], PROG_NAME_INVOKER) )
     {
@@ -940,10 +957,11 @@ int main(int argc, char *argv[])
         {"test-mode",        no_argument,       NULL, 'T'},
         {"type",             required_argument, NULL, 't'},
         {"application",      required_argument, NULL, 'a'},
+        {"auto-application", no_argument,       NULL, 'A'},
         {"delay",            required_argument, NULL, 'd'},
         {"respawn",          required_argument, NULL, 'r'},
-        {"splash",           required_argument, NULL, 'S'},
-        {"splash-landscape", required_argument, NULL, 'L'},
+        {"splash",           required_argument, NULL, 'S'}, // Legacy, ignored
+        {"splash-landscape", required_argument, NULL, 'L'}, // Legacy, ignored
         {"desktop-file",     required_argument, NULL, 'F'},
         {"verbose",          no_argument,       NULL, 'v'},
         {0, 0, 0, 0}
@@ -953,7 +971,7 @@ int main(int argc, char *argv[])
     // The use of + for POSIXLY_CORRECT behavior is a GNU extension, but avoids polluting
     // the environment
     int opt;
-    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:r:S:L:F:", longopts, NULL)) != -1)
+    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:Ar:S:L:F:", longopts, NULL)) != -1)
     {
         switch(opt)
         {
@@ -996,6 +1014,11 @@ int main(int argc, char *argv[])
 
         case 'a':
             args.app_name = optarg;
+            auto_application = false;
+            break;
+
+        case 'A':
+            auto_application = true;
             break;
 
         case 'd':
@@ -1067,6 +1090,9 @@ int main(int argc, char *argv[])
             exit(EXIT_FAILURE);
     }
 
+    if (auto_application)
+        args.app_name = basename(args.prog_argv[0]);
+
     if (!args.app_type) {
         report(report_error, "Application type must be specified with --type.\n");
         usage(1);
@@ -1089,9 +1115,14 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    // Application specific boosters are running in sandbox and can
+    // thus launch only sandboxed processes, otherwise
     // If arguments don't define sailjail and sailjaild says the app must be sandboxed,
     // we force sandboxing here
-    if (strcmp(args.prog_name, SAILJAIL_PATH) && ask_for_sandboxing(args.prog_name)) {
+    if (!strcmp(args.app_name, UNDEFINED_APPLICATION) &&
+        strcmp(args.prog_name, SAILJAIL_PATH) &&
+        ask_for_sandboxing(args.prog_name)) {
+        warning("enforcing sandboxing for '%s'", args.prog_name);
         // We must use generic booster here as nothing else would work
         // to run sailjail which is not compiled for launching via booster
         args.app_type = BOOSTER_GENERIC;
