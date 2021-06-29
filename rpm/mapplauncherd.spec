@@ -7,6 +7,7 @@ URL:        https://github.com/sailfishos/mapplauncherd
 Source0:    %{name}-%{version}.tar.bz2
 Source1:    booster-cgroup-mount.service
 Requires:   systemd-user-session-targets
+Requires:   sailjail
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 Requires(pre):  sailfish-setup
