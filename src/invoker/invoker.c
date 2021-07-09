@@ -611,6 +611,8 @@ static void usage(int status)
            "                         from the booster. The score is reset to 0 normally.\n"
            "  -T, --test-mode        Invoker test mode. Also control file in root home should be in place.\n"
            "  -F, --desktop-file     Desktop file of the application to notify lipstick of launching app.\n"
+           "  -I, --id               Sandboxing id to check if sandboxing should be forced.\n"
+           "                         If this is not defined, it's guessed from binary name.\n"
            "  -h, --help             Print this help.\n"
            "  -v, --verbose          Make invoker more verbose. Can be given several times.\n"
            "\n"
@@ -772,6 +774,7 @@ typedef struct InvokeArgs {
     unsigned int  respawn_delay;
     bool          test_mode;
     const char   *desktop_file;
+    char         *sandboxing_id;
     unsigned int  exit_delay;
 } InvokeArgs;
 
@@ -786,6 +789,7 @@ typedef struct InvokeArgs {
     .respawn_delay = RESPAWN_DELAY,\
     .test_mode     = false,\
     .desktop_file  = NULL,\
+    .sandboxing_id = NULL,\
     .exit_delay    = EXIT_DELAY,\
 }
 
@@ -963,6 +967,7 @@ int main(int argc, char *argv[])
         {"splash",           required_argument, NULL, 'S'}, // Legacy, ignored
         {"splash-landscape", required_argument, NULL, 'L'}, // Legacy, ignored
         {"desktop-file",     required_argument, NULL, 'F'},
+        {"id",               required_argument, NULL, 'I'},
         {"verbose",          no_argument,       NULL, 'v'},
         {0, 0, 0, 0}
     };
@@ -971,7 +976,7 @@ int main(int argc, char *argv[])
     // The use of + for POSIXLY_CORRECT behavior is a GNU extension, but avoids polluting
     // the environment
     int opt;
-    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:Ar:S:L:F:", longopts, NULL)) != -1)
+    while ((opt = getopt_long(argc, argv, "+hvcwnGDsoTd:t:a:Ar:S:L:F:I:", longopts, NULL)) != -1)
     {
         switch(opt)
         {
@@ -1041,6 +1046,10 @@ int main(int argc, char *argv[])
 
         case 'F':
             args.desktop_file = optarg;
+            break;
+
+        case 'I':
+            args.sandboxing_id = strdup(optarg);
             break;
 
         case '?':
@@ -1115,25 +1124,36 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    // If sailjail is already used or app specific booster is used, skip checking for sandboxing
+    if (!strcmp(args.prog_name, SAILJAIL_PATH) || strcmp(args.app_name, UNDEFINED_APPLICATION)) {
+        args.sandboxing_id = NULL;
+    } else if (!args.sandboxing_id) {
+        // When id is not defined, assume it can be derived from binary path
+        char *path = strdup(args.prog_name);
+        args.sandboxing_id = strdup(basename(path));
+        free(path);
+    }
+
     // Application specific boosters are running in sandbox and can
     // thus launch only sandboxed processes, otherwise
     // If arguments don't define sailjail and sailjaild says the app must be sandboxed,
     // we force sandboxing here
-    if (!strcmp(args.app_name, UNDEFINED_APPLICATION) &&
-        strcmp(args.prog_name, SAILJAIL_PATH) &&
-        ask_for_sandboxing(args.prog_name)) {
+    if (args.sandboxing_id && ask_for_sandboxing(args.sandboxing_id)) {
         warning("enforcing sandboxing for '%s'", args.prog_name);
         // We must use generic booster here as nothing else would work
         // to run sailjail which is not compiled for launching via booster
         args.app_type = BOOSTER_GENERIC;
         // Prepend sailjail
         char **old_argv = args.prog_argv;
-        args.prog_argc += 2;
+        args.prog_argc += 4;
         args.prog_argv = (char **)calloc(args.prog_argc + 1, sizeof *args.prog_argv);
         args.prog_argv[0] = SAILJAIL_PATH;
-        args.prog_argv[1] = "--";
-        for (int i = 2; i < args.prog_argc + 1; ++i)
-            args.prog_argv[i] = old_argv[i-2];
+        args.prog_argv[1] = "-p";
+        args.prog_argv[2] = args.sandboxing_id,
+            args.sandboxing_id = NULL;
+        args.prog_argv[3] = "--";
+        for (int i = 4; i < args.prog_argc + 1; ++i)
+            args.prog_argv[i] = old_argv[i-4];
         // Don't free old_argv because it's probably not dynamically allocated
         free(args.prog_name);
         args.prog_name = strdup(SAILJAIL_PATH);

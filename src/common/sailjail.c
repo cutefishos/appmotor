@@ -198,22 +198,22 @@ sailjail_application_info(DBusConnection *con, const char *desktop)
         switch (dbus_message_iter_get_arg_type(&variantIter)) {
         case DBUS_TYPE_INT32:
             dbus_message_iter_get_basic(&variantIter, &value);
-            warning("%s = int32:%d", key, value.i32);
+            debug("%s = int32:%d", key, value.i32);
             g_hash_table_insert(info, g_strdup(key), g_variant_new_int32(value.i32));
             break;
         case DBUS_TYPE_UINT32:
             dbus_message_iter_get_basic(&variantIter, &value);
-            warning("%s = uint32:%d", key, value.u32);
+            debug("%s = uint32:%d", key, value.u32);
             g_hash_table_insert(info, g_strdup(key), g_variant_new_uint32(value.u32));
             break;
         case DBUS_TYPE_BOOLEAN:
             dbus_message_iter_get_basic(&variantIter, &value);
-            warning("%s = bool:%d", key, value.bool_val);
+            debug("%s = bool:%d", key, value.bool_val);
             g_hash_table_insert(info, g_strdup(key), g_variant_new_boolean(value.bool_val));
             break;
         case DBUS_TYPE_STRING:
             dbus_message_iter_get_basic(&variantIter, &value);
-            warning("%s = string:'%s'", key, value.str);
+            debug("%s = string:'%s'", key, value.str);
             g_hash_table_insert(info, g_strdup(key), g_variant_new_string(value.str));
             break;
         case DBUS_TYPE_ARRAY:
@@ -229,7 +229,7 @@ sailjail_application_info(DBusConnection *con, const char *desktop)
                     if (!iter_at(&valueIter, DBUS_TYPE_STRING))
                         break;
                     dbus_message_iter_get_basic(&valueIter, &value);
-                    warning("%s[%d] = string:'%s'", key, i, value.str);
+                    debug("%s[%d] = string:'%s'", key, i, value.str);
 
                     dbus_message_iter_next(&valueIter);
                     v[i++] = g_strdup(value.str);
@@ -259,7 +259,7 @@ EXIT:
         dbus_message_unref(rsp);
     if (req)
         dbus_message_unref(req);
-    warning("info received = %s", info ? "true" : "false");
+    debug("info received = %s", info ? "true" : "false");
     return info;
 }
 
@@ -312,7 +312,7 @@ EXIT:
     if (req)
         dbus_message_unref(req);
 
-    warning("launch permitted = %s", granted ? "true" : "false");
+    info("launch permitted = %s", granted ? "true" : "false");
     return granted;
 }
 
