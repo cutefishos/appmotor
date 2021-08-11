@@ -54,6 +54,29 @@
 #define CODE_INVALID_ARGS     "org.freedesktop.DBus.Error.InvalidArgs"
 #define ERROR_INVALID_APPNAME "Invalid application name: "
 
+/* Directories */
+#define BINDIR "/usr/bin"
+
+const gchar *
+path_basename(const gchar *path)
+{
+    const gchar *base = NULL;
+    if( path ) {
+        gchar *end = strrchr(path, '/');
+        base = end ? end + 1 : path;
+    }
+    return base;
+}
+
+static bool
+path_dirname_eq(const char *path, const char *target)
+{
+    gchar *dir_path = g_path_get_dirname(path);
+    bool result = !strcmp(dir_path, target);
+    g_free(dir_path);
+    return result;
+}
+
 static DBusConnection *
 sailjail_connect_bus(void)
 {
@@ -341,12 +364,6 @@ sailjailclient_match_argv(const char **tpl_argv, const char **app_argv)
 {
     bool matching = false;
 
-    /* Rule out template starting with a field code */
-    if (sailjailclient_get_field_code(*tpl_argv)) {
-        error("Exec line starts with field code");
-        goto EXIT;
-    }
-
     /* Match each arg in template */
     for (;;) {
         const char *want = *tpl_argv++;
@@ -486,19 +503,31 @@ sailjailclient_validate_argv(const char *exec, const gchar **app_argv)
     /* Expectation: Exec line might have leading 'wrapper' executables
      * such as sailjail, invoker, etc -> make an attempt to skip those
      * by looking for argv[0] for command we are about to launch.
+     *
+     * App may also be defined without absolute path, in which case it
+     * must reside in BINDIR and it must not have any 'wrapper'
+     * executables. Thus check the path of app_argv[0] and compare Exec
+     * line to the binary name.
      */
     const char **tpl_argv = (const char **)exec_argv;
-    for (; *tpl_argv; ++tpl_argv) {
-        if (!g_strcmp0(*tpl_argv, app_argv[0]))
-            break;
+    if (!path_dirname_eq(app_argv[0], BINDIR) ||
+            g_strcmp0(*tpl_argv, path_basename(app_argv[0]))) {
+        /* App is not specified without path as the first argument,
+         * => there might be 'wrappers' and we match to full path.
+         */
+        for( ; *tpl_argv; ++tpl_argv ) {
+            if( !g_strcmp0(*tpl_argv, app_argv[0]) )
+                break;
+        }
+
+        if( !*tpl_argv ) {
+            error("Exec line does not contain '%s'", *app_argv);
+            goto EXIT;
+        }
     }
 
-    if (!*tpl_argv) {
-        error("Exec line does not contain '%s'", *app_argv);
-        goto EXIT;
-    }
-
-    if (!sailjailclient_match_argv(tpl_argv, app_argv)) {
+    /* Argument zero has been checked already */
+    if (!sailjailclient_match_argv(tpl_argv + 1, app_argv + 1)) {
         gchar *args = g_strjoinv(" ", (gchar **)app_argv);
         error("Application args do not match Exec line template");
         error("exec: %s", exec);
