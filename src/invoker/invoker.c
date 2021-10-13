@@ -583,7 +583,7 @@ static void usage(int status)
            "launch anything. Possible values for TYPE:\n"
            "  qt5                    Launch a Qt 5 application.\n"
            "  qtquick2               Launch a Qt Quick 2 (QML) application.\n"
-           "  silica-qt5             Launch a Sailfish Silica application.\n"
+           "  cutefish               Launch a Cutefish application.\n"
            "  generic                Launch any application, even if it's not a library.\n"
            "\n"
            "The TYPE may also be a comma delimited list of boosters to try. The first available\n"
@@ -615,7 +615,7 @@ static void usage(int status)
            "  -h, --help             Print this help.\n"
            "  -v, --verbose          Make invoker more verbose. Can be given several times.\n"
            "\n"
-           "Example: %s --type=qt5 /usr/bin/helloworld\n"
+           "Example: %s --type=cutefish /usr/bin/helloworld\n"
            "\n",
            PROG_NAME_INVOKER, EXIT_DELAY, RESPAWN_DELAY, MAX_RESPAWN_DELAY, PROG_NAME_INVOKER);
 

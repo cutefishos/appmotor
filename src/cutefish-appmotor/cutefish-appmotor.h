@@ -17,51 +17,48 @@
 **
 ****************************************************************************/
 
-#ifndef BOOSTER_GENERIC_H
-#define BOOSTER_GENERIC_H
+#ifndef CUTEFISH_APPMOTOR_H
+#define CUTEFISH_APPMOTOR_H
 
 #include "booster.h"
 
 /*!
-    \class EBooster
-    \brief EBooster is a "booster" that only exec()'s the given binary.
-
-    This can be used to launch any application.
+ * \class CutefishBooster.
+ * \brief Qt-specific version of the Booster.
  */
-class EBooster : public Booster
+class CutefishBooster : public Booster
 {
 public:
 
-    EBooster() {}
-    virtual ~EBooster() {}
+    //! Constructor.
+    CutefishBooster() {};
+
+    //! Destructor.
+    virtual ~CutefishBooster() {};
 
     //! \reimp
     virtual const string & boosterType() const;
 
-protected:
+    virtual void initialize(int initialArgc, char ** initialArgv, int boosterLauncherSocket,
+                            int socketFd, SingleInstance * singleInstance,
+                            bool bootMode) override;
 
-    //! \reimp
-    virtual int launchProcess();
+protected:
 
     //! \reimp
     virtual bool preload();
 
+    virtual int launchProcess();
+
 private:
 
     //! Disable copy-constructor
-    EBooster(const EBooster & r);
+    CutefishBooster(const CutefishBooster & r);
 
     //! Disable assignment operator
-    EBooster & operator= (const EBooster & r);
+    CutefishBooster & operator= (const CutefishBooster & r);
 
     static const string m_boosterType;
-
-    //! wait for socket connection
-    void accept();
-
-#ifdef UNIT_TEST
-    friend class Ut_EBooster;
-#endif
 };
 
-#endif // EBooster_H
+#endif //QTBOOSTER_H

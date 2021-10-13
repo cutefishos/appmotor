@@ -17,27 +17,24 @@
 **
 ****************************************************************************/
 
-#include "booster-generic.h"
-#include "launcherlib.h"
+#include "cutefish-appmotor.h"
 #include "daemon.h"
-#include "logger.h"
-#include <errno.h>
-#include <string.h>
+
 #include <unistd.h>
 
-const string EBooster::m_boosterType  = "generic";
+#include <QQuickView>
+#include <QtGlobal>
+#include <QApplication>
+#include <QDebug>
 
-const string & EBooster::boosterType() const
+const string CutefishBooster::m_boosterType = "cutefish";
+
+const string & CutefishBooster::boosterType() const
 {
     return m_boosterType;
 }
 
-bool EBooster::preload()
-{
-    return true;
-}
-
-int EBooster::launchProcess()
+int CutefishBooster::launchProcess()
 {
     Booster::setEnvironmentBeforeLaunch();
 
@@ -61,9 +58,24 @@ int EBooster::launchProcess()
     return EXIT_FAILURE;
 }
 
+void CutefishBooster::initialize(int initialArgc, char **initialArgv, int boosterLauncherSocket,
+                           int socketFd, SingleInstance *singleInstance, bool bootMode)
+{
+    new QApplication(initialArgc, initialArgv);
+    Booster::initialize(initialArgc, initialArgv, boosterLauncherSocket, socketFd, singleInstance, bootMode);
+}
+
+bool CutefishBooster::preload()
+{
+    QQuickView window;
+    window.create();
+
+    return true;
+}
+
 int main(int argc, char **argv)
 {
-    EBooster *booster = new EBooster;
+    CutefishBooster *booster = new CutefishBooster;
 
     Daemon d(argc, argv);
     d.run(booster);
