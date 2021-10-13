@@ -1,5 +1,26 @@
-What is applauncherd?
-==============================
+# Cutefish AppMotor
+
+Optimize the speed of starting cutefish apps.
+
+## Dependencies
+
+Debian/Ubuntu Dependencies:
+
+```shell
+sudo apt install cmake qtbase5-dev qtdeclarative5-dev qtquickcontrols2-5-dev libsystemd-dev libcap-dev
+```
+
+## Build
+
+```shell
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr ..
+make
+sudo make install
+```
+
+## Introduction
 
 Applauncherd is a daemon that helps to launch applications faster by
 preloading dynamically linked libraries and caching stuff.
@@ -11,17 +32,6 @@ Some technical details are explained below.
 
 Install applauncherd-doc for the Doxygen-based user documentation.
 See INSTALL on how to build applauncherd and the documentation.
-
-Building
-==============================
-
-    BUILD_TESTS=1 ./configure
-    make
-    make doc
-    make install
-
-Technical overview
-==============================
 
 Booster daemons (written using the provided library) are started as part of the
 user session. The booster is responsible for forking the will-be-application
@@ -42,8 +52,7 @@ shared library or a position independent executable (-pie) and it should
 always export main(). There's also a "booster" for all applications.
 In that case exec() is used.
 
-Technical details
-==============================
+## Technical details
 
 Loading the binary is done with dlopen(), and therefore the
 application needs to be compiled and linked as a shared library or a
@@ -59,8 +68,7 @@ name of the application. Then the booster process waits for a connection
 from the invoker with the information about which application should be
 launched. 
 
-Contributors
-==============================
+## Contributors
 
 People who have contributed to mapplauncherd:
 
