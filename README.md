@@ -92,3 +92,6 @@ Some parts of the code is based on the maemo-launcher by:
 Guillem Jover
 Michael Natterer
 
+## License
+
+This project has been licensed by LGPL-2.1.
