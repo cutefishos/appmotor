@@ -19,7 +19,6 @@
 
 #include "appdata.h"
 #include "protocol.h"
-#include "sailjail.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
@@ -129,7 +128,6 @@ const string & AppData::appName() const
 void AppData::setFileName(const string & newFileName)
 {
     m_fileName = newFileName;
-    checkPrivileges();
 }
 
 const string & AppData::fileName() const
@@ -236,43 +234,6 @@ string AppData::getPrivileges(const char *path)
     }
 
     return permissions;
-}
-
-void AppData::checkPrivileges()
-{
-    /*
-        This function checks the standard paths to find privileges definition file
-        and sets the m_privileges string.
-        First it will check
-            /usr/share/mapplauncherd/privileges
-        And then, any file in
-            /usr/share/mapplauncherd/privileges.d/
-     */
-
-    /* Sailjail does not use this system to gain privileged group.
-     * It is skipped to avoid unintended consequenses when launching
-     * other apps via sailjail.
-     */
-    if (m_fileName == SAILJAIL_PATH) {
-        m_privileges.clear();
-        return;
-    }
-
-    static const char *BOOSTER_APP_PRIVILEGES_LIST = "/usr/share/mapplauncherd/privileges";
-    static const char *BOOSTER_APP_PRIVILEGES_DIR = "/usr/share/mapplauncherd/privileges.d";
-    m_privileges = getPrivileges(BOOSTER_APP_PRIVILEGES_LIST);
-
-    DIR *privilegesDir = opendir(BOOSTER_APP_PRIVILEGES_DIR);
-    if (privilegesDir) {
-        dirent *dir = NULL;
-        while ((dir = readdir(privilegesDir))) {
-            std::string privilegesFile (BOOSTER_APP_PRIVILEGES_DIR);
-            privilegesFile += "/";
-            privilegesFile += dir->d_name;
-            m_privileges += getPrivileges(privilegesFile.c_str());
-        }
-        closedir(privilegesDir);
-    }
 }
 
 bool AppData::isPrivileged() const

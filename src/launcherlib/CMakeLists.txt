@@ -16,8 +16,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
 # Set sources
 set(SRC appdata.cpp booster.cpp connection.cpp daemon.cpp logger.cpp
         singleinstance.cpp socketmanager.cpp
-        ../common/report.c
-        ../common/sailjail.c)
+        ../common/report.c)
 
 set(HEADERS appdata.h booster.h connection.h daemon.h logger.h launcherlib.h
     singleinstance.h socketmanager.h ${COMMON}/protocol.h)

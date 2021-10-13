@@ -6,7 +6,7 @@ pkg_check_modules(DBUS dbus-1 REQUIRED)
 pkg_check_modules(GLIB glib-2.0 REQUIRED)
 
 # Set sources
-set(SRC invokelib.c invoker.c ${COMMON}/report.c search.c ${COMMON}/sailjail.c)
+set(SRC invokelib.c invoker.c ${COMMON}/report.c search.c)
 
 # Set include dirs
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${DBUS_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS} ${COMMON})

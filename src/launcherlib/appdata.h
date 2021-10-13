@@ -134,7 +134,6 @@ private:
     AppData(const AppData & r);
     AppData & operator= (const AppData & r);
     string getPrivileges(const char *path);
-    void checkPrivileges();
 
     uint32_t    m_options;
     int         m_argc;

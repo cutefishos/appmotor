@@ -55,8 +55,6 @@
 
 #include "coverage.h"
 
-#include "sailjail.h"
-
 static std::string basename(const std::string &str)
 {
     return str.substr(str.find_last_of("/") + 1);
@@ -121,8 +119,8 @@ void Booster::initialize(int initialArgc, char ** initialArgv, int newBoosterLau
             SingleInstancePluginEntry * pluginEntry = singleInstance->pluginEntry();
             if (pluginEntry)
             {
-                std::string lockedAppName = getFinalName(m_appData->appName());
-                if (!pluginEntry->lockFunc(lockedAppName.c_str()))
+                std::string lockedAppName = m_appData->appName();
+                if (!pluginEntry->lockFunc(m_appData->appName().c_str()))
                 {
                     // Try to activate the window of the existing instance
                     if (!pluginEntry->activateExistingInstanceFunc(lockedAppName.c_str()))
@@ -285,21 +283,6 @@ int Booster::run(SocketManager * socketManager)
         // Execute the binary
         Logger::logDebug("Booster: invoking '%s' ", m_appData->fileName().c_str());
         try {
-            if (access(m_appData->fileName().c_str(), X_OK) != 0) {
-                throw std::runtime_error("Booster: Binary doesn't have execute permissions\n");
-            }
-
-            if (boostedApplication() != "default") {
-                if (!sailjail_verify_launch(boostedApplication().c_str(), m_appData->argv()))
-                    throw std::runtime_error("Booster: Binary doesn't have launch permissions\n");
-            } else if (m_appData->fileName() != SAILJAIL_PATH &&
-                    sailjail_sandbox(basename(m_appData->fileName()).c_str())) {
-                Logger::logDebug("Sandboxing '%s'", m_appData->fileName());
-                // Prepend sailjail to arguments
-                m_appData->prependArgv(SAILJAIL_PATH);
-                m_appData->setFileName(SAILJAIL_PATH);
-            }
-
             return launchProcess();
         } catch (const std::runtime_error &e) {
             Logger::logError("Booster: Failed to invoke: %s\n", e.what());
@@ -463,7 +446,7 @@ void Booster::setEnvironmentBeforeLaunch()
     if (!errno && cur_prio < m_appData->priority())
         setpriority(PRIO_PROCESS, 0, m_appData->priority());
 
-    std::string fileName = getFinalName(m_appData->fileName());
+    std::string fileName = m_appData->fileName();
     setCgroup(fileName);
 
     if (!m_appData->isPrivileged()) {
@@ -709,35 +692,3 @@ void Booster::resetOomAdj()
         Logger::logError("Couldn't open '%s' for writing", PROC_OOM_ADJ_FILE);
     }
 }
-
-std::string Booster::getFinalName(const std::string &name)
-{
-    if (name == SAILJAIL_PATH) {
-        // This doesn't implement sailjail's parsing logic but instead
-        // has some assumptions about the arguments:
-        // - If there is --, then the application is
-        //   the next argument after that.
-        // - If there is an argument that begins with /usr/bin/,
-        //   then the application is that argument.
-        // The one that is found first is used as the application name.
-        // Otherwise it can not be deduced and the original value is used.
-        //
-        // If you want to give a value to sailjail that begins with /usr/bin/,
-        // use the long format with '=' character between the argument and the
-        // value.
-        // If the application is specified without /usr/bin,
-        // then adding -- before the application name allows this to work.
-        const char **ptr = m_appData->argv()+1;
-        for (int i = 1; i < m_appData->argc(); i++, ptr++) {
-            if (strcmp(*ptr, "--") == 0) {
-                if (i+1 < m_appData->argc()) {
-                    return std::string(*(++ptr));
-                }
-            } else if (strncmp(*ptr, "/usr/bin/", 9) == 0) {
-                return std::string(*ptr);
-            }
-        }
-    }
-    return name;
-}
-
