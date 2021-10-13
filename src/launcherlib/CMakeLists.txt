@@ -35,11 +35,11 @@ set_target_properties(applauncherd PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR})
 
 # Configure and install the pkgconfig file
-ecm_generate_pkgconfig_file(
-	BASE_NAME applauncherd
-	FILENAME_VAR applauncherd
-	DESCRIPTION ${PROJECT_DESCRIPTION}
-	INSTALL)
+# ecm_generate_pkgconfig_file(
+# 	BASE_NAME applauncherd
+# 	FILENAME_VAR applauncherd
+# 	DESCRIPTION ${PROJECT_DESCRIPTION}
+# 	INSTALL)
 
 # Add install rule
 install(TARGETS applauncherd

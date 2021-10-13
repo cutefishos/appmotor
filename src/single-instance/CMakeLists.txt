@@ -23,7 +23,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden -fPIC")
 link_libraries(${DBUS_LDFLAGS})
 
 # Set target
-add_executable(single-instance ${SRC})
+add_executable(cutefish-single-instance ${SRC})
 
 # Add install rule
-install(TARGETS single-instance DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})
+install(TARGETS cutefish-single-instance DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})

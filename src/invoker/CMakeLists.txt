@@ -12,12 +12,12 @@ set(SRC invokelib.c invoker.c ${COMMON}/report.c search.c ${COMMON}/sailjail.c)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${DBUS_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS} ${COMMON})
 
 # Set precompiler flags
-add_definitions(-DPROG_NAME_INVOKER="invoker")
+add_definitions(-DPROG_NAME_INVOKER="cutefish-invoker")
 
 # Set target
-add_executable(invoker ${SRC})
+add_executable(cutefish-invoker ${SRC})
 
-target_link_libraries(invoker ${DBUS_LDFLAGS} ${GLIB_LDFLAGS})
+target_link_libraries(cutefish-invoker ${DBUS_LDFLAGS} ${GLIB_LDFLAGS})
 
 # Add install rule
-install(TARGETS invoker DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})
+install(TARGETS cutefish-invoker DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})
