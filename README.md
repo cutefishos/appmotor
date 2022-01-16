@@ -7,7 +7,7 @@ Optimize the speed of starting cutefish apps.
 Debian/Ubuntu Dependencies:
 
 ```shell
-sudo apt install cmake qtbase5-dev qtdeclarative5-dev qtquickcontrols2-5-dev libsystemd-dev libcap-dev
+sudo apt install cmake qtbase5-dev qtdeclarative5-dev qtquickcontrols2-5-dev libsystemd-dev libcap-dev libdbus-1-dev
 ```
 
 ## Build
